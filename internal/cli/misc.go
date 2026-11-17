@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tmunzer-AIDE/mistctl/internal/output"
 )
 
 func mustJSON(v any) json.RawMessage {
@@ -28,8 +29,11 @@ when a name is not found. API tokens are never written to the cache.`,
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "clear",
-		Short: "Delete all cached data (it is rebuilt on the next command that needs it)",
-		Args:  cobra.NoArgs,
+		Short: "Delete the cached indexes (they are rebuilt on the next command that needs them)",
+		Long: `Delete the index files mistctl wrote in the cache directory. Other files in
+that directory are never touched, and the home or current directory is
+refused as a cache directory.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := a.cache()
 			if err := s.Clear(); err != nil {
@@ -50,7 +54,7 @@ when a name is not found. API tokens are never written to the cache.`,
 }
 
 func newAPIResourcesCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	return withFormats(&cobra.Command{
 		Use:   "api-resources",
 		Short: "List the resource types mistctl supports",
 		Long: `List every resource type that ` + "`get`" + ` and ` + "`describe`" + ` accept, with its short
@@ -61,31 +65,37 @@ names and its scope:
   site      needs a site (--site or the context's default site)
   org/site  read from the site when one is set, else from the whole org
 
-With -o wide, also shows the Mist API endpoints each resource reads.`,
+With -o wide, also shows the Mist API endpoints each resource reads; -o json,
+-o yaml and -o name are supported too.`,
 		Example: `  mistctl api-resources
   mistctl api-resources -o wide`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tw := tabwriter.NewWriter(a.out, 0, 0, 3, ' ', 0)
-			if !a.noHeaders {
-				header := "NAME\tSHORTNAMES\tSCOPE\tDESCRIPTION"
-				if a.output == "wide" {
-					header += "\tENDPOINTS"
-				}
-				fmt.Fprintln(tw, header)
-			}
+			items := make([]json.RawMessage, 0, len(registry))
 			for _, r := range registry {
-				short := "-"
-				if len(r.Aliases) > 0 {
-					short = strings.Join(r.Aliases, ",")
-				}
-				line := fmt.Sprintf("%s\t%s\t%s\t%s", r.Name, short, r.Scope, r.Short)
-				if a.output == "wide" {
-					line += "\t" + r.Endpoint
-				}
-				fmt.Fprintln(tw, line)
+				items = append(items, mustJSON(map[string]any{
+					"name": r.Name, "shortnames": append([]string{}, r.Aliases...), "scope": r.Scope,
+					"description": r.Short, "endpoints": splitEndpoints(r.Endpoint),
+				}))
 			}
-			return tw.Flush()
+			cols := []output.Column{
+				output.Col("NAME", "name"),
+				output.Col("SHORTNAMES", "shortnames"),
+				output.Col("SCOPE", "scope"),
+				output.Col("DESCRIPTION", "description"),
+				output.Col("ENDPOINTS", "endpoints").AsWide(),
+			}
+			return output.Printer{Format: a.output, NoHeaders: a.noHeaders}.PrintList(a.out, items, cols)
 		},
+	}, output.Formats...)
+}
+
+func splitEndpoints(s string) []string {
+	out := []string{}
+	for _, e := range strings.Split(s, ", ") {
+		if e = strings.TrimSpace(e); e != "" {
+			out = append(out, e)
+		}
 	}
+	return out
 }

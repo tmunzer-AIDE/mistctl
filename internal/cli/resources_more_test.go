@@ -244,7 +244,7 @@ func TestAlarms(t *testing.T) {
 		t.Errorf("alarms not sorted newest first:\n%s", out)
 	}
 	c := fake.called("/api/v1/orgs/" + orgID + "/alarms/search")
-	if len(c) != 1 || !strings.Contains(c[0], "group=infrastructure%2Csecurity") || !strings.Contains(c[0], "severity=critical") || !strings.Contains(c[0], "duration=7d") {
+	if len(c) != 1 || !strings.Contains(c[0], "group=infrastructure%2Csecurity") || !strings.Contains(c[0], "severity=critical") || windowOf(c[0]) != 7*86400 || !strings.Contains(c[0], "sort=-timestamp") {
 		t.Errorf("alarm filters not passed: %v", c)
 	}
 	run(t, "get", "alarms", "--site", "HQ")
@@ -286,7 +286,7 @@ func TestSles(t *testing.T) {
 	out = run(t, "get", "sles", "--sle", "wired")
 	assertContains(t, out, "SWITCH-HEALTH", "50.0%")
 	assertNotContains(t, out, "COVERAGE")
-	if c := fake.called("/api/v1/orgs/" + orgID + "/insights/sites-sle"); len(c) == 0 || !strings.Contains(c[0], "duration=1d") {
+	if c := fake.called("/api/v1/orgs/" + orgID + "/insights/sites-sle"); len(c) == 0 || windowOf(c[0]) != 86400 {
 		t.Errorf("duration not passed: %v", c)
 	}
 }

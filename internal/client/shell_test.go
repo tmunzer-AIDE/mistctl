@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -68,17 +69,47 @@ func TestShellSessionRejectsBadURL(t *testing.T) {
 	}
 }
 
-func TestShellHeaderOnlyForSameCloud(t *testing.T) {
+func TestShellURLPolicy(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {})
 	for u, want := range map[string]bool{
-		"wss://api-ws.mist.com/ssh":       true,
-		"wss://api.mist.com/ssh":          true,
-		"wss://evil.example.com/ssh":      false,
-		"wss://mist.com.evil.example/ssh": false,
-		"wss://evilmist.com/ssh":          false,
+		"wss://api-ws.mist.com/ssh/s1?jwt=x": true,
+		"wss://API-WS.mist.com:443/ssh":      true,
+		"wss://api.mist.com/ssh":             true,
+		"ws://api-ws.mist.com/ssh":           false, // cleartext
+		"https://api-ws.mist.com/ssh":        false,
+		"wss://user:pw@api-ws.mist.com/ssh":  false,
+		"wss://api-ws.mist.com:8443/ssh":     false,
+		"wss://other.mist.com/ssh":           false, // same parent domain is not enough
+		"wss://api-ws.gc1.mist.com/ssh":      false, // another cloud
+		"wss://evil.example.com/ssh":         false,
+		"wss://mist.com.evil.example/ssh":    false,
+		"wss://evilmist.com/ssh":             false,
+		"wss:///ssh":                         false,
 	} {
+		err := c.CheckShellURL(u)
+		if (err == nil) != want {
+			t.Errorf("CheckShellURL(%s) = %v, want ok=%v", u, err, want)
+		}
 		if got := c.ShellHeader(u).Get("Authorization") == "Token tok"; got != want {
 			t.Errorf("ShellHeader(%s) sends token = %v, want %v", u, got, want)
 		}
+	}
+}
+
+func TestShellSessionRejectsCleartext(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"session":"s1","url":"ws://api-ws.mist.com/ssh/s1?secret=1"}`)
+	})
+	_, err := c.ShellSession(context.Background(), uuid.New(), uuid.New(), "")
+	if err == nil || !strings.Contains(err.Error(), "wss") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("expected a wss policy error without the query, got %v", err)
+	}
+}
+
+func TestShellHTTPClientRefusesRedirects(t *testing.T) {
+	c := ShellHTTPClient()
+	req, _ := http.NewRequest("GET", "https://api-ws.mist.com/ssh", nil)
+	if err := c.CheckRedirect(req, nil); err == nil {
+		t.Fatal("redirects must be refused")
 	}
 }

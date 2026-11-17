@@ -56,6 +56,11 @@ type resource struct {
 	EnrichAlways bool
 	// ColumnsFor overrides Columns when the columns depend on flags.
 	ColumnsFor func(o *listOpts) []output.Column
+	// NameKeys are the fields printed by -o name: the first non-empty one,
+	// or all of them joined with ":" when NameJoin is set. A key can list
+	// fallbacks as "a|b". Default: name, hostname, mac, id.
+	NameKeys []string
+	NameJoin bool
 	// MatchKeys are the fields `get RESOURCE NAME` compares NAME with
 	// (default: name, hostname, id, and mac for MAC-looking queries).
 	MatchKeys []string
@@ -84,6 +89,36 @@ type resource struct {
 type described struct {
 	Header [][2]string
 	Doc    json.RawMessage
+}
+
+// nameFunc returns the -o name identifier of the resource's items.
+func (r *resource) nameFunc() func(map[string]any) string {
+	if len(r.NameKeys) == 0 {
+		return nil
+	}
+	first := func(m map[string]any, keys string) string {
+		for _, k := range strings.Split(keys, "|") {
+			if v := output.Text(output.Get(m, k)); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+	return func(m map[string]any) string {
+		if r.NameJoin {
+			parts := make([]string, 0, len(r.NameKeys))
+			for _, k := range r.NameKeys {
+				parts = append(parts, first(m, k))
+			}
+			return strings.Join(parts, ":")
+		}
+		for _, k := range r.NameKeys {
+			if v := first(m, k); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
 }
 
 func (r *resource) names() []string {
@@ -125,6 +160,34 @@ func init() {
 		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(),
 	}
 	applyResourceHelp()
+	applyNameKeys()
+}
+
+// applyNameKeys sets the stable identifier -o name prints for resources
+// whose rows have no (unique) name.
+func applyNameKeys() {
+	keys := map[string][]string{
+		"clients":    {"mac"},
+		"wlans":      {"ssid", "id"},
+		"rrm":        {"band"},
+		"alarms":     {"id"},
+		"events":     {"type"},
+		"sles":       {"site_name|site_id"},
+		"rrm-events": {"device_name|ap"},
+	}
+	joined := map[string][]string{
+		"ports":      {"device_name|mac", "port_id"},
+		"bgp-peers":  {"device_name|mac", "neighbor"},
+		"ospf-peers": {"device_name|mac", "peer_ip"},
+	}
+	for _, r := range registry {
+		if k, ok := keys[r.Name]; ok {
+			r.NameKeys = k
+		}
+		if k, ok := joined[r.Name]; ok {
+			r.NameKeys, r.NameJoin = k, true
+		}
+	}
 }
 
 // ---- orgs -----------------------------------------------------------------
@@ -191,7 +254,7 @@ func orgsResource() *resource {
 			if serr == nil {
 				s = output.Decode(stats.Body)
 			}
-			return &described{
+			return (&described{
 				Header: [][2]string{
 					{"Name", output.Text(o["name"])},
 					{"ID", e.ID},
@@ -205,7 +268,7 @@ func orgsResource() *resource {
 					{"Created", ageOf(o["created_time"])},
 				},
 				Doc: combine("org", org.Body, "stats", bodyOrNil(stats, serr)),
-			}, nil
+			}).noteUnavailable(a, "stats", serr), nil
 		},
 	}
 }
@@ -280,7 +343,7 @@ func sitesResource() *resource {
 				}
 				return fmt.Sprintf("%s/%s connected", orDash(c), t)
 			}
-			return &described{
+			return (&described{
 				Header: [][2]string{
 					{"Name", output.Text(si["name"])},
 					{"ID", e.ID},
@@ -294,7 +357,7 @@ func sitesResource() *resource {
 					{"Created", ageOf(si["created_time"])},
 				},
 				Doc: combine("site", site.Body, "stats", bodyOrNil(stats, serr)),
-			}, nil
+			}).noteUnavailable(a, "stats", serr), nil
 		},
 	}
 }
@@ -446,7 +509,7 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 		}
 		return output.Text(c[k])
 	}
-	return &described{
+	return (&described{
 		Header: [][2]string{
 			{"Name", pick("name")},
 			{"ID", e.ID},
@@ -463,7 +526,7 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 			{"Clients", output.Text(s["num_clients"])},
 		},
 		Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr)),
-	}, nil
+	}).noteUnavailable(a, "stats", serr), nil
 }
 
 // ---- helpers --------------------------------------------------------------
@@ -517,6 +580,27 @@ func combine(k1 string, v1 json.RawMessage, k2 string, v2 json.RawMessage) json.
 		parts = append(parts, string(k)+":"+string(kv.v))
 	}
 	return json.RawMessage("{" + strings.Join(parts, ",") + "}")
+}
+
+// noteUnavailable records that a secondary request of describe failed: the
+// summary gets a "<What>: unavailable ..." line, the document a
+// "<what>_error" field and stderr a warning, so a 401/403/429 or a service
+// error is never mistaken for missing data. A 404 means "no data" and is not
+// reported.
+func (d *described) noteUnavailable(a *app, what string, err error) *described {
+	if err == nil || isNotFound(err) {
+		return d
+	}
+	fmt.Fprintf(a.err, "warning: %s unavailable: %v\n", what, err)
+	label := strings.ToUpper(what[:1]) + what[1:]
+	d.Header = append(d.Header, [2]string{label, "unavailable: " + err.Error()})
+	d.Doc = appendField(d.Doc, what+"_error", err.Error())
+	return d
+}
+
+func isNotFound(err error) bool {
+	var apiErr *client.APIError
+	return errors.As(err, &apiErr) && apiErr.Status == 404
 }
 
 func bodyOrNil(r client.Raw, err error) json.RawMessage {

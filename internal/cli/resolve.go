@@ -8,7 +8,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/tmunzer/mistapi-go/mistapi/models"
@@ -40,7 +39,9 @@ func (a *app) config() (*config.Config, error) {
 }
 
 // resolveTarget merges config file, environment and flags.
-// Precedence: flags > environment ($MIST_APITOKEN, $MIST_HOST) > context.
+// Precedence: flags > environment ($MIST_APITOKEN, $MIST_HOST, $MIST_ORG_ID)
+// > context. A default site inherited from the context only applies while the
+// org is the context's org.
 func (a *app) resolveTarget() (*target, error) {
 	if a.target != nil {
 		return a.target, nil
@@ -72,9 +73,6 @@ func (a *app) resolveTarget() (*target, error) {
 	if v := os.Getenv("MIST_HOST"); v != "" {
 		cloudName = v
 	}
-	if v := os.Getenv("MIST_ORG_ID"); v != "" && a.org == "" && t.Org == "" {
-		t.Org = v
-	}
 	if cloudName == "" {
 		if t.Name == "" && t.Token == "" {
 			return nil, errors.New("no context configured; run `mistctl config set-context <name> --cloud <cloud> --token <token>`")
@@ -84,14 +82,28 @@ func (a *app) resolveTarget() (*target, error) {
 	if t.Cloud, err = cloud.Lookup(cloudName); err != nil {
 		return nil, err
 	}
+	if a.site != "" && a.allSites {
+		return nil, errors.New("--site and --all-sites cannot be used together")
+	}
+	// The context's default site belongs to the context's org. Remember
+	// that org so the site is dropped when $MIST_ORG_ID or --org selects
+	// another org (see siteID).
+	if t.Site != "" {
+		t.siteInherited, t.siteOrg = true, t.Org
+	}
+	if v := os.Getenv("MIST_ORG_ID"); v != "" {
+		t.orgOverridden = t.orgOverridden || !strings.EqualFold(v, t.Org)
+		t.Org = v
+	}
 	if a.org != "" {
+		t.orgOverridden = t.orgOverridden || !strings.EqualFold(a.org, t.Org)
 		t.Org = a.org
 	}
 	if a.site != "" {
-		t.Site = a.site
+		t.Site, t.siteInherited, t.siteOrg = a.site, false, ""
 	}
 	if a.allSites {
-		t.Site = ""
+		t.Site, t.siteInherited = "", false
 	}
 	a.target = t
 	return t, nil
@@ -117,9 +129,9 @@ func (a *app) cache() *cache.Store {
 	if a.store != nil {
 		return a.store
 	}
-	ttl := 10 * time.Minute
-	if cfg, err := a.config(); err == nil && cfg.CacheTTL != "" {
-		if d, err := time.ParseDuration(cfg.CacheTTL); err == nil {
+	ttl := config.DefaultCacheTTL
+	if cfg, err := a.config(); err == nil {
+		if d, err := cfg.TTL(); err == nil {
 			ttl = d
 		}
 	}
@@ -350,16 +362,55 @@ func (a *app) siteID(ctx context.Context) (id uuid.UUID, ok bool, err error) {
 	if t.Site == "" {
 		return uuid.Nil, false, nil
 	}
-	if id, ok := client.ParseUUID(t.Site); ok {
-		return id, true, nil
+	if t.siteResolved != uuid.Nil {
+		return t.siteResolved, true, nil
 	}
-	e, err := a.lookup(ctx, kindSites, t.Site)
+	org, err := a.orgID(ctx)
 	if err != nil {
 		return uuid.Nil, false, err
 	}
+	if t.siteInherited && t.orgOverridden && !a.sameOrg(ctx, t.siteOrg, org) {
+		// The context's default site belongs to another org: run at org
+		// scope rather than query a site of the previous org.
+		if a.debug {
+			fmt.Fprintf(a.err, "note: ignoring the context's default site %q, which belongs to another org\n", t.Site)
+		}
+		t.Site, t.siteInherited = "", false
+		return uuid.Nil, false, nil
+	}
+	// Names and IDs are both checked against the org's site index, so a site
+	// of another org is rejected instead of being queried directly.
+	e, err := a.lookup(ctx, kindSites, t.Site)
+	if err != nil {
+		// Site-scoped tokens may not be allowed to list the org's sites:
+		// use a site ID as given and let the API enforce the scope.
+		var apiErr *client.APIError
+		if u, isID := client.ParseUUID(t.Site); isID && errors.As(err, &apiErr) && apiErr.Status == 403 {
+			t.siteResolved = u
+			return u, true, nil
+		}
+		return uuid.Nil, false, fmt.Errorf("%w in org %s", err, org)
+	}
 	id, _ = client.ParseUUID(e.ID)
-	t.Site = e.ID
+	t.Site, t.siteResolved = e.ID, id
 	return id, true, nil
+}
+
+// sameOrg reports whether the org reference ref (name or ID, possibly empty)
+// is the org id.
+func (a *app) sameOrg(ctx context.Context, ref string, id uuid.UUID) bool {
+	if ref == "" {
+		return false
+	}
+	if u, ok := client.ParseUUID(ref); ok {
+		return u == id
+	}
+	orgs, err := a.index(ctx, kindOrgs, true)
+	if err != nil {
+		return false
+	}
+	m := cache.Match(orgs, ref)
+	return len(m) == 1 && strings.EqualFold(m[0].ID, id.String())
 }
 
 // siteNames returns id->name for sites, using the cache (never fails).

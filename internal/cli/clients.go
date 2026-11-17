@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/spf13/pflag"
 	"github.com/tmunzer/mistapi-go/mistapi/models"
 
@@ -59,6 +61,7 @@ func clientsResource() *resource {
 		List: listClients,
 		DescribeFlags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.clientType, "type", "all", "client type: all, wireless, wired")
+			fs.StringVar(&o.duration, "duration", "7d", "how far back the org-wide client search looks (e.g. 1d, 7d, 2w)")
 		},
 		EnrichAlways: true,
 		Enrich: func(ctx context.Context, a *app, items []json.RawMessage) []json.RawMessage {
@@ -141,12 +144,41 @@ func listWireless(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, 
 		return nil, err
 	}
 	if hasSite {
-		var lim *int
-		if o.limit > 0 {
-			lim = &o.limit
-		}
-		r, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.StatsClient], error) {
-			return cl.SDK.SitesStatsClientsWireless().ListSiteWirelessClientsStats(ctx, site, nil, lim, nil, nil, nil)
+		return listSiteWireless(ctx, a, cl, site, o.limit)
+	}
+	org, err := a.orgID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	w, err := timeWindow(o.duration)
+	if err != nil {
+		return nil, err
+	}
+	return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+		return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseClientSearch], error) {
+			return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClients(ctx, org, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
+		})
+	})
+}
+
+// listSiteWireless lists the wireless clients connected to a site now.
+//
+// The endpoint returns 100 clients unless a limit is sent, and the SDK does
+// not expose its page parameter. mistctl asks for pages of PageSize clients
+// (adding page=N itself) and stops on a short page, on X-Page-Total, or when a
+// page brings no new MAC (the API ignored the page parameter). In that last
+// case the list may be incomplete, and a warning says so.
+func listSiteWireless(ctx context.Context, a *app, cl *client.Client, site uuid.UUID, max int) ([]json.RawMessage, error) {
+	limit := client.PageSize
+	if max > 0 && max < limit {
+		limit = max
+	}
+	var out []json.RawMessage
+	seen := map[string]bool{}
+	for page := 1; page <= 1000; page++ {
+		pctx := client.WithQuery(ctx, "page", strconv.Itoa(page))
+		r, err := client.Call(pctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.StatsClient], error) {
+			return cl.SDK.SitesStatsClientsWireless().ListSiteWirelessClientsStats(ctx, site, nil, &limit, nil, nil, nil)
 		})
 		if err != nil {
 			return nil, err
@@ -155,17 +187,37 @@ func listWireless(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, 
 		if err := json.Unmarshal(r.Body, &items); err != nil {
 			return nil, fmt.Errorf("unexpected response: %w", err)
 		}
-		return items, nil
+		fresh := 0
+		for _, it := range items {
+			mac := cache.NormalizeMAC(output.Text(output.Decode(it)["mac"]))
+			if mac != "" && seen[mac] {
+				continue
+			}
+			seen[mac] = true
+			out = append(out, it)
+			fresh++
+		}
+		if max > 0 && len(out) >= max {
+			return out[:max], nil
+		}
+		total := atoiHeader(r.Header.Get("X-Page-Total"))
+		switch {
+		case len(items) < limit, total > 0 && len(out) >= total:
+			return out, nil
+		case fresh == 0:
+			fmt.Fprintf(a.err, "warning: the site returned %d connected clients, the most it sends at once; the list may be incomplete (use -A to search the whole org)\n", len(out))
+			return out, nil
+		}
 	}
-	org, err := a.orgID(ctx)
-	if err != nil {
-		return nil, err
+	return out, nil
+}
+
+func atoiHeader(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
+		return 0
 	}
-	return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
-		return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseClientSearch], error) {
-			return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClients(ctx, org, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, nil, nil, client.Ptr(o.duration), nil, after)
-		})
-	})
+	return n
 }
 
 func listWired(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
@@ -177,11 +229,14 @@ func listWired(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, err
 	if err != nil {
 		return nil, err
 	}
-	dur := client.Ptr(o.duration)
+	w, err := timeWindow(o.duration)
+	if err != nil {
+		return nil, err
+	}
 	if hasSite {
 		return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
-				return cl.SDK.SitesClientsWired().SearchSiteWiredClients(ctx, site, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, nil, nil, dur, nil, after)
+				return cl.SDK.SitesClientsWired().SearchSiteWiredClients(ctx, site, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
 			})
 		})
 	}
@@ -191,7 +246,7 @@ func listWired(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, err
 	}
 	return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 		return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
-			return cl.SDK.OrgsClientsWired().SearchOrgWiredClients(ctx, org, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, nil, nil, dur, nil, after)
+			return cl.SDK.OrgsClientsWired().SearchOrgWiredClients(ctx, org, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
 		})
 	})
 }
@@ -204,23 +259,31 @@ func describeClient(ctx context.Context, a *app, name string) (*described, error
 	if !cache.IsMAC(name) {
 		return nil, fmt.Errorf("clients are identified by MAC address, got %q", name)
 	}
-	t := "all"
-	if a.describeOpts != nil && a.describeOpts.clientType != "" {
-		t = a.describeOpts.clientType
+	t, dur := "all", "7d"
+	if o := a.describeOpts; o != nil {
+		if o.clientType != "" {
+			t = o.clientType
+		}
+		if o.duration != "" {
+			dur = o.duration
+		}
 	}
 	if !contains(clientTypes, t) {
 		return nil, fmt.Errorf("invalid --type %q (valid: %s)", t, strings.Join(clientTypes, ", "))
 	}
+	w, err := timeWindow(dur)
+	if err != nil {
+		return nil, err
+	}
 	mac := cache.NormalizeMAC(name)
 	var wl, wd *described
-	var err error
 	if t != "wired" {
-		if wl, err = describeWireless(ctx, a, mac); err != nil && !errors.Is(err, errClientNotFound) {
+		if wl, err = describeWireless(ctx, a, mac, w); err != nil && !errors.Is(err, errClientNotFound) {
 			return nil, err
 		}
 	}
 	if t != "wireless" {
-		if wd, err = describeWired(ctx, a, mac); err != nil && !errors.Is(err, errClientNotFound) {
+		if wd, err = describeWired(ctx, a, mac, w); err != nil && !errors.Is(err, errClientNotFound) {
 			return nil, err
 		}
 	}
@@ -236,7 +299,7 @@ func describeClient(ctx context.Context, a *app, name string) (*described, error
 	if t != "all" {
 		label = t + " client"
 	}
-	return nil, fmt.Errorf("%s %s not seen in the last 7 days", label, name)
+	return nil, fmt.Errorf("%s %s not seen in the last %s (org-wide client search)", label, name, dur)
 }
 
 // mergeDescribed combines the wireless and wired views of one client.
@@ -259,55 +322,64 @@ func mergeDescribed(wl, wd *described) *described {
 	return &described{Header: header, Doc: combine("wireless", wl.Doc, "wired", wd.Doc)}
 }
 
-func describeWireless(ctx context.Context, a *app, mac string) (*described, error) {
+// searchClientHistory returns the most recent org-wide search record of a
+// wireless client in the window, or nil.
+func searchClientHistory(ctx context.Context, cl *client.Client, org uuid.UUID, mac string, w window) (json.RawMessage, error) {
+	limit := 1
+	r, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseClientSearch], error) {
+		return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClients(ctx, org, nil, nil, nil, nil, nil, nil, &mac, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, nil)
+	})
+	if err != nil {
+		return nil, err
+	}
+	var res struct {
+		Results []json.RawMessage `json:"results"`
+	}
+	if err := json.Unmarshal(r.Body, &res); err != nil {
+		return nil, fmt.Errorf("unexpected search response: %w", err)
+	}
+	if len(res.Results) == 0 {
+		return nil, nil
+	}
+	return res.Results[0], nil
+}
+
+// describeWireless finds a wireless client with an org-wide search over the
+// window (whatever site is selected), then reads its current stats on the
+// site it was last seen on. A failed stats request is reported as such, never
+// as "not connected".
+func describeWireless(ctx context.Context, a *app, mac string, w window) (*described, error) {
 	cl, err := a.client()
 	if err != nil {
 		return nil, err
 	}
-	site, hasSite, err := a.siteID(ctx)
+	org, err := a.orgID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var last json.RawMessage
-	if !hasSite {
-		org, err := a.orgID(ctx)
-		if err != nil {
-			return nil, err
-		}
-		limit, dur := 1, "7d"
-		r, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseClientSearch], error) {
-			return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClients(ctx, org, nil, nil, nil, nil, nil, nil, &mac, nil, nil, nil, nil, nil, nil, nil, nil, &limit, nil, nil, &dur, nil, nil)
-		})
-		if err != nil {
-			return nil, err
-		}
-		var res struct {
-			Results []json.RawMessage `json:"results"`
-		}
-		_ = json.Unmarshal(r.Body, &res)
-		if len(res.Results) == 0 {
-			return nil, errClientNotFound
-		}
-		last = res.Results[0]
-		sid, ok := client.ParseUUID(output.Text(output.Decode(last)["site_id"]))
-		if !ok {
-			return &described{Doc: combine("last_seen", last, "", nil)}, nil
-		}
-		site = sid
+	last, err := searchClientHistory(ctx, cl, org, mac, w)
+	if err != nil {
+		return nil, err
+	}
+	if last == nil {
+		return nil, errClientNotFound
+	}
+	site, ok := client.ParseUUID(output.Text(output.Decode(last)["site_id"]))
+	if !ok {
+		return &described{Doc: combine("last_seen", last, "", nil)}, nil
 	}
 	stats, serr := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.StatsClient], error) {
 		return cl.SDK.SitesStatsClientsWireless().GetSiteWirelessClientStats(ctx, site, mac, nil)
 	})
-	if serr != nil && last == nil {
-		var apiErr *client.APIError
-		if errors.As(serr, &apiErr) && apiErr.Status == 404 {
-			return nil, errClientNotFound
-		}
-		return nil, serr
-	}
 	s, l := map[string]any{}, output.Decode(last)
-	if serr == nil {
+	state := "connected"
+	switch {
+	case serr == nil:
 		s = output.Decode(stats.Body)
+	case isNotFound(serr):
+		state = "not connected"
+	default:
+		state = "unknown (current stats unavailable)"
 	}
 	if l == nil {
 		l = map[string]any{}
@@ -323,11 +395,7 @@ func describeWireless(ctx context.Context, a *app, mac string) (*described, erro
 		}
 		return ""
 	}
-	state := "connected"
-	if serr != nil {
-		state = "not connected"
-	}
-	return &described{
+	d := &described{
 		Header: [][2]string{
 			{"Hostname", get("hostname", "last_hostname")},
 			{"MAC", mac},
@@ -345,10 +413,11 @@ func describeWireless(ctx context.Context, a *app, mac string) (*described, erro
 			{"Uptime", output.Duration(s["uptime"])},
 		},
 		Doc: combine("stats", bodyOrNil(stats, serr), "last_seen", last),
-	}, nil
+	}
+	return d.noteUnavailable(a, "stats", serr), nil
 }
 
-func describeWired(ctx context.Context, a *app, mac string) (*described, error) {
+func describeWired(ctx context.Context, a *app, mac string, w window) (*described, error) {
 	cl, err := a.client()
 	if err != nil {
 		return nil, err
@@ -357,9 +426,9 @@ func describeWired(ctx context.Context, a *app, mac string) (*described, error) 
 	if err != nil {
 		return nil, err
 	}
-	limit, dur := 1, "7d"
+	limit := 1
 	r, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
-		return cl.SDK.OrgsClientsWired().SearchOrgWiredClients(ctx, org, nil, nil, nil, nil, nil, &mac, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, nil, nil, &dur, nil, nil)
+		return cl.SDK.OrgsClientsWired().SearchOrgWiredClients(ctx, org, nil, nil, nil, nil, nil, &mac, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, nil)
 	})
 	if err != nil {
 		return nil, err

@@ -7,10 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tmunzer-AIDE/mistctl/internal/fsutil"
 )
 
 // Entry is one indexed object.
@@ -86,20 +89,107 @@ func (s *Store) Put(scope, kind string, entries []Entry) error {
 	if err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, p)
+	// A unique temporary file per write: concurrent mistctl processes (a
+	// command and a shell completion) never write the same temp file.
+	return fsutil.WriteFileAtomic(p, b)
 }
 
-// Clear removes everything.
+// Clear removes the cache files mistctl wrote, and only those: scope
+// directories named like a Key, holding index files (and leftover temporary
+// files of interrupted writes). Anything else in the cache directory is left
+// alone, so a cache directory set to a shared folder never loses unrelated
+// files. Obviously unsafe roots (filesystem root, home, current directory)
+// are refused outright.
 func (s *Store) Clear() error {
-	err := os.RemoveAll(s.Dir)
+	if err := checkCacheRoot(s.Dir); err != nil {
+		return err
+	}
+	scopes, err := os.ReadDir(s.Dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	for _, sc := range scopes {
+		if !sc.IsDir() || !isKey(sc.Name()) {
+			continue
+		}
+		dir := filepath.Join(s.Dir, sc.Name())
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			if f.Type().IsRegular() && isCacheFile(f.Name()) {
+				if err := os.Remove(filepath.Join(dir, f.Name())); err != nil {
+					return err
+				}
+			}
+		}
+		_ = os.Remove(dir) // only succeeds when empty
+	}
+	_ = os.Remove(s.Dir) // only succeeds when empty
+	return nil
+}
+
+// checkCacheRoot refuses directories that can never be a dedicated cache.
+func checkCacheRoot(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("no cache directory configured")
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	abs = filepath.Clean(abs)
+	unsafe := []string{}
+	if home, err := os.UserHomeDir(); err == nil {
+		unsafe = append(unsafe, home)
+	}
+	if wd, err := os.Getwd(); err == nil {
+		unsafe = append(unsafe, wd)
+	}
+	if filepath.Dir(abs) == abs {
+		return fmt.Errorf("refusing to clear %s: it is a filesystem root, not a cache directory", dir)
+	}
+	for _, u := range unsafe {
+		if filepath.Clean(u) == abs {
+			return fmt.Errorf("refusing to clear %s: point $MISTCTL_CACHE_DIR at a directory dedicated to mistctl", dir)
+		}
+	}
+	return nil
+}
+
+// isKey reports whether name looks like a scope directory created by Key.
+func isKey(name string) bool {
+	if len(name) != 16 {
+		return false
+	}
+	for _, c := range name {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return false
+		}
+	}
+	return true
+}
+
+// isCacheFile matches index files ("sites.json") and the temporary files
+// of WriteFileAtomic (".sites.json.tmp-123").
+func isCacheFile(name string) bool {
+	if strings.HasPrefix(name, ".") && strings.Contains(name, ".json.tmp-") {
+		return true
+	}
+	kind := strings.TrimSuffix(name, ".json")
+	if kind == name || kind == "" {
+		return false
+	}
+	for _, c := range kind {
+		if !(c >= 'a' && c <= 'z' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // NormalizeMAC lowercases a MAC and strips separators.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -36,42 +37,79 @@ func (c *Client) ShellSession(ctx context.Context, site, device uuid.UUID, node 
 	if err := json.Unmarshal(raw.Body, &s); err != nil || s.URL == "" {
 		return "", errors.New("the shell API did not return a websocket URL")
 	}
-	u, err := url.Parse(s.URL)
-	if err != nil || (u.Scheme != "wss" && u.Scheme != "ws") {
-		return "", errors.New("the shell API returned an invalid websocket URL")
+	if err := c.CheckShellURL(s.URL); err != nil {
+		return "", err
 	}
 	return s.URL, nil
 }
 
+// ShellHosts returns the websocket hosts allowed for the client's cloud: the
+// API host and its "api-ws" counterpart (api.gc1.mist.com ->
+// api-ws.gc1.mist.com). Nothing else under the parent domain is trusted.
+func (c *Client) ShellHosts() []string {
+	host := strings.ToLower(c.Cloud.Host)
+	hosts := []string{host}
+	if rest, ok := strings.CutPrefix(host, "api."); ok {
+		hosts = append(hosts, "api-ws."+rest)
+	}
+	return hosts
+}
+
+// CheckShellURL enforces the websocket policy of remote shells: wss only, a
+// host of the selected cloud (see ShellHosts), the default port (or 443) and
+// no user info. The API token is only ever sent to such a URL.
+func (c *Client) CheckShellURL(wsURL string) error {
+	u, err := url.Parse(wsURL)
+	if err != nil {
+		return errors.New("the shell API returned an invalid websocket URL")
+	}
+	bad := func(why string) error {
+		return fmt.Errorf("refusing the websocket URL returned by the shell API (%s): %s", redactURL(u), why)
+	}
+	switch {
+	case u.Scheme != "wss":
+		return bad("only wss:// (TLS) is allowed")
+	case u.User != nil:
+		return bad("user info is not allowed")
+	case u.Hostname() == "":
+		return bad("no host")
+	case u.Port() != "" && u.Port() != "443":
+		return bad("unexpected port " + u.Port())
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, h := range c.ShellHosts() {
+		if host == h {
+			return nil
+		}
+	}
+	return bad(fmt.Sprintf("host is not one of %s", strings.Join(c.ShellHosts(), ", ")))
+}
+
+// redactURL drops the query (which can carry a session secret) from errors.
+func redactURL(u *url.URL) string {
+	v := *u
+	v.RawQuery, v.User = "", nil
+	return v.String()
+}
+
 // ShellHeader returns the headers to send when opening the shell websocket.
-// The API token is only sent to hosts of the same Mist cloud as the API
-// (e.g. api-ws.mist.com for api.mist.com), never to an arbitrary host.
+// The API token is only added when the URL passes CheckShellURL.
 func (c *Client) ShellHeader(wsURL string) http.Header {
 	h := http.Header{}
-	u, err := url.Parse(wsURL)
-	if err != nil || c.token == "" {
+	if c.token == "" || c.CheckShellURL(wsURL) != nil {
 		return h
 	}
-	if sameCloud(c.Cloud.Host, u.Hostname()) {
-		h.Set("Authorization", "Token "+c.token)
-	}
+	h.Set("Authorization", "Token "+c.token)
 	return h
 }
 
-// sameCloud reports whether host belongs to the same domain as the API host
-// (the API host minus its first label).
-func sameCloud(apiHost, host string) bool {
-	apiHost, host = strings.ToLower(apiHost), strings.ToLower(host)
-	if host == apiHost {
-		return true
+// ShellHTTPClient is the HTTP client for the websocket handshake. Redirects
+// are refused, so the token can never follow one to another host.
+func ShellHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: BaseTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return fmt.Errorf("refusing to follow a websocket redirect to %s", req.URL.Host)
+		},
 	}
-	i := strings.IndexByte(apiHost, '.')
-	if i < 0 {
-		return false
-	}
-	parent := apiHost[i+1:]
-	if !strings.Contains(parent, ".") {
-		return false
-	}
-	return strings.HasSuffix(host, "."+parent)
 }

@@ -91,6 +91,13 @@ func alarmsResource() *resource {
 			if err != nil {
 				return nil, err
 			}
+			w, err := timeWindow(o.duration)
+			if err != nil {
+				return nil, err
+			}
+			// Sort server-side so --limit keeps the newest alarms (the API
+			// default is oldest first).
+			srt := client.Ptr(newestFirst)
 			return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.AlarmSearchResult], error) {
 					if hasSite {
@@ -104,9 +111,9 @@ func alarmsResource() *resource {
 							v := models.AlarmSeverityEnum(severity)
 							s = &v
 						}
-						return cl.SDK.SitesAlarms().SearchSiteAlarms(ctx, site, g, s, client.Ptr(o.eventType), nil, nil, &limit, nil, nil, client.Ptr(o.duration), nil, after)
+						return cl.SDK.SitesAlarms().SearchSiteAlarms(ctx, site, g, s, client.Ptr(o.eventType), nil, nil, &limit, w.start, w.end, nil, srt, after)
 					}
-					return cl.SDK.OrgsAlarms().SearchOrgAlarms(ctx, org, nil, client.Ptr(group), client.Ptr(severity), client.Ptr(o.eventType), nil, nil, nil, nil, client.Ptr(o.duration), &limit, nil, after)
+					return cl.SDK.OrgsAlarms().SearchOrgAlarms(ctx, org, nil, client.Ptr(group), client.Ptr(severity), client.Ptr(o.eventType), nil, nil, w.start, w.end, nil, &limit, srt, after)
 				})
 			})
 		},
@@ -172,57 +179,59 @@ func listEvents(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, er
 	if o.source == "system" && mac != nil {
 		return nil, fmt.Errorf("--device does not apply to system events")
 	}
-	typ, dur, srt := client.Ptr(o.eventType), client.Ptr(o.duration), client.Ptr(newestFirst)
+	w, err := timeWindow(o.duration)
+	if err != nil {
+		return nil, err
+	}
+	typ, srt := client.Ptr(o.eventType), client.Ptr(newestFirst)
 	var fetch func(ctx context.Context, limit int, after *string) (client.Raw, error)
 	switch {
 	case o.source == "device" && hasSite:
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsDevices], error) {
-				return cl.SDK.SitesDevices().SearchSiteDeviceEvents(ctx, site, mac, nil, nil, typ, nil, nil, &limit, nil, nil, dur, srt, after)
+				return cl.SDK.SitesDevices().SearchSiteDeviceEvents(ctx, site, mac, nil, nil, typ, nil, nil, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
 	case o.source == "device":
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseDeviceEventsSearch], error) {
-				return cl.SDK.OrgsDevices().SearchOrgDeviceEvents(ctx, org, mac, nil, nil, nil, typ, nil, nil, &limit, nil, nil, dur, srt, after)
+				return cl.SDK.OrgsDevices().SearchOrgDeviceEvents(ctx, org, mac, nil, nil, nil, typ, nil, nil, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
 	case o.source == "client" && hasSite:
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsSearch], error) {
-				return cl.SDK.SitesClientsWireless().SearchSiteWirelessClientEvents(ctx, site, typ, nil, nil, mac, nil, nil, nil, nil, &limit, nil, nil, dur, srt, after)
+				return cl.SDK.SitesClientsWireless().SearchSiteWirelessClientEvents(ctx, site, typ, nil, nil, mac, nil, nil, nil, nil, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
 	case o.source == "client":
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsSearch], error) {
-				return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClientEvents(ctx, org, typ, nil, nil, mac, nil, nil, nil, nil, nil, nil, nil, dur, srt, &limit, after)
+				return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClientEvents(ctx, org, typ, nil, nil, mac, nil, nil, nil, nil, nil, w.start, w.end, nil, srt, &limit, after)
 			})
 		}
 	case hasSite: // system
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseDeviceEventsSearch], error) {
-				return cl.SDK.SitesEvents().SearchSiteSystemEvents(ctx, site, typ, &limit, nil, nil, dur, srt, after)
+				return cl.SDK.SitesEvents().SearchSiteSystemEvents(ctx, site, typ, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
 	default: // org system events: the API has no type filter
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseOrgSystemEventsSearch], error) {
-				return cl.SDK.OrgsEvents().SearchOrgSystemEvents(ctx, org, &limit, nil, nil, dur, srt, after)
+				return cl.SDK.OrgsEvents().SearchOrgSystemEvents(ctx, org, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
 	}
-	items, err := client.SearchAll(ctx, o.limit, fetch)
-	if err != nil || o.source != "system" || hasSite || o.eventType == "" {
-		return items, err
+	if o.source != "system" || hasSite || o.eventType == "" {
+		return client.SearchAll(ctx, o.limit, fetch)
 	}
-	var out []json.RawMessage
-	for _, it := range items {
-		if strings.EqualFold(output.Text(output.Decode(it)["type"]), o.eventType) {
-			out = append(out, it)
-		}
-	}
-	return out, nil
+	// Org system events have no server-side type filter: filter locally and
+	// apply --limit to the matches, reading further pages until enough
+	// matches are found or the window is exhausted.
+	return client.SearchFiltered(ctx, o.limit, func(it json.RawMessage) bool {
+		return strings.EqualFold(output.Text(output.Decode(it)["type"]), o.eventType)
+	}, fetch)
 }
 
 // ---- SLEs -----------------------------------------------------------------
@@ -294,14 +303,18 @@ func slesResource() *resource {
 			if err != nil {
 				return nil, err
 			}
+			w, err := timeWindow(o.duration)
+			if err != nil {
+				return nil, err
+			}
 			kind := models.OrgSiteSleTypeEnum(o.sle)
 			max := o.limit
 			if hasSite {
 				max = 0 // filter after fetching
 			}
-			items, err := listPagedResults(ctx, max, func(ctx context.Context, limit, page int) (client.Raw, error) {
+			items, err := client.PagedAll(ctx, max, func(ctx context.Context, limit, page int) (client.Raw, error) {
 				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseOrgSiteSle], error) {
-					return cl.SDK.OrgsSLEs().GetOrgSitesSle(ctx, org, &kind, nil, nil, client.Ptr(o.duration), nil, &limit, &page)
+					return cl.SDK.OrgsSLEs().GetOrgSitesSle(ctx, org, &kind, w.start, w.end, nil, nil, &limit, &page)
 				})
 			})
 			if err != nil || !hasSite {
@@ -315,36 +328,6 @@ func slesResource() *resource {
 			}
 			return out, nil
 		},
-	}
-}
-
-// listPagedResults follows page-based pagination of endpoints that wrap
-// their items in {"results": [...], "total": N}.
-func listPagedResults(ctx context.Context, max int, fetch func(ctx context.Context, limit, page int) (client.Raw, error)) ([]json.RawMessage, error) {
-	var out []json.RawMessage
-	limit := client.PageSize
-	if max > 0 && max < limit {
-		limit = max
-	}
-	for page := 1; ; page++ {
-		r, err := fetch(ctx, limit, page)
-		if err != nil {
-			return nil, err
-		}
-		var body struct {
-			Results []json.RawMessage `json:"results"`
-			Total   int               `json:"total"`
-		}
-		if err := json.Unmarshal(r.Body, &body); err != nil {
-			return nil, fmt.Errorf("unexpected response: %w", err)
-		}
-		out = append(out, body.Results...)
-		if max > 0 && len(out) >= max {
-			return out[:max], nil
-		}
-		if len(body.Results) < limit || (body.Total > 0 && len(out) >= body.Total) {
-			return out, nil
-		}
 	}
 }
 
@@ -610,14 +593,18 @@ func rrmEventsResource() *resource {
 			if err != nil {
 				return nil, err
 			}
+			w, err := timeWindow(o.duration)
+			if err != nil {
+				return nil, err
+			}
 			var band *models.Dot11BandEnum
 			if o.band != "" {
 				b := models.Dot11BandEnum(o.band)
 				band = &b
 			}
-			return listPagedResults(ctx, o.limit, func(ctx context.Context, limit, page int) (client.Raw, error) {
+			return client.PagedAll(ctx, o.limit, func(ctx context.Context, limit, page int) (client.Raw, error) {
 				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsRrm], error) {
-					return cl.SDK.SitesRRM().ListSiteRrmEvents(ctx, site, band, nil, nil, client.Ptr(o.duration), &limit, &page)
+					return cl.SDK.SitesRRM().ListSiteRrmEvents(ctx, site, band, w.start, w.end, nil, &limit, &page)
 				})
 			})
 		},

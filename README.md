@@ -13,12 +13,19 @@ sw-core    switch   EX4100   5c5b35000002   -           disconnected   -        
 
 ## Read-only by design
 
-mistctl only sends `GET` requests. Every request goes through a transport
+mistctl is read-oriented: its API commands only send `GET` requests, plus an
+interactive remote shell (`attach`). Every request goes through a transport
 that refuses any other HTTP method before it leaves your machine. The single,
 allow-listed exception is `POST /api/v1/sites/{site_id}/devices/{device_id}/shell`,
-used by `mistctl attach` to open a remote shell. For defence in depth, use an
-API token with the **read (Observer)** role; `mistctl whoami` warns when the
-token has more than that.
+used by `mistctl attach` to open a remote shell. The HTTP guard cannot restrict
+what is typed inside that shell: with a token that can write, the shell can
+change the device. Use an API token with the **read (Observer)** role;
+`mistctl whoami` and `mistctl attach` warn when the token has more than that.
+
+The shell websocket must be `wss://` on the selected cloud's API or `api-ws`
+host; anything else (cleartext, another host or port, a redirect) is refused
+and the token is never sent to it. Table, name and describe output escape
+terminal control characters coming from the API; JSON and YAML keep the data.
 
 ## Remote shell (`attach`)
 
@@ -129,15 +136,36 @@ any format (`5c5b35000001`, `5C:5B:35:00:00:01`, `5c-5b-...`).
 | `--no-cache` | Resolve names live instead of from the cache |
 | `-v, --verbose` | Print each HTTP request with status and timing |
 
-JSON and YAML output is the API response exactly as returned (key order
-preserved), plus a `site_name` field on devices and clients for convenience.
+JSON and YAML output carries every field of the API objects, in the API's key
+order, with these documented changes: search envelopes are flattened to the
+list of results (an empty result is `[]`); convenience fields are added
+(`site_name`, `device_name`, `client_type`); a MAC seen both wireless and wired
+is one client object with the wired records under `wired`; `rrm` reshapes the
+site RRM document into one row per band; `describe` combines objects under
+keys such as `config` and `stats`, and adds `stats_error` when the stats
+could not be read. `-o name` prints one stable identifier per row (MAC for
+clients, SSID for WLANs, `DEVICE:PORT` for ports, band for RRM).
+
+`get`, `describe`, `api-resources`, `config get-contexts` and `config clouds`
+support every format; `whoami`, `usage` and `config view` support table, json
+and yaml. Other commands reject `-o json/yaml/name` instead of ignoring it.
+
+`--limit` caps the rows fetched and shown (0 means all); NAME arguments and
+local filters apply to the fetched rows. `--duration` accepts Mist units
+(`30m`, `12h`, `7d`, `2w`); historical searches use one fixed time window for
+every page.
+
+mistctl exits with status 0 on success and 1 on any error; errors and
+warnings (for example, stats that could not be read) go to stderr.
 
 ## Contexts and configuration
 
 Contexts live in `<user config dir>/mistctl/config.yaml` (`~/.config/mistctl` on
 Linux, `~/Library/Application Support/mistctl` on macOS, `%AppData%\mistctl`
-on Windows), written with `0600` permissions. Override the path with
-`--config` or `$MISTCTL_CONFIG`.
+on Windows), written atomically with `0600` permissions. Override the path
+with `--config` or `$MISTCTL_CONFIG`. Unknown keys, empty contexts and an
+invalid `cache-ttl` are reported as errors instead of being ignored, and
+`mistctl config view --raw` prints a file that loads back as is.
 
 ```yaml
 current-context: prod
@@ -155,7 +183,12 @@ contexts:
 
 Environment variables override the context and match the other Mist tools:
 `MIST_APITOKEN`, `MIST_HOST` (e.g. `api.eu.mist.com`), `MIST_ORG_ID`, plus
-`MISTCTL_CONTEXT`.
+`MISTCTL_CONTEXT`. Precedence is flags, then environment, then context.
+
+The context's default site belongs to the context's org: when `MIST_ORG_ID`
+or `--org` selects another org, that default site is ignored and commands run
+at org scope. An explicit `--site` (name or ID) must belong to the selected
+org, and cannot be combined with `-A/--all-sites`.
 
 `mistctl config clouds` lists the supported clouds. Cloud names accept the
 short name (`global01`, `emea02`, `apac01`, `gov`), the API host
@@ -167,6 +200,8 @@ mistctl keeps small name/ID indexes (orgs, sites, device inventory) in the user
 cache directory so it can resolve names, fill tab-completions and show site
 names without spending API budget. Indexes refresh after `cache-ttl` (default
 10 minutes) or when a name is not found. Tokens are never written to the cache.
+Override the directory with `$MISTCTL_CACHE_DIR`; `mistctl cache clear` only
+deletes the index files mistctl wrote there, never other files.
 
 ```sh
 # bash

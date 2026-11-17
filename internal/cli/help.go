@@ -42,13 +42,13 @@ var resourceHelps = map[string]resourceHelp{
 		group: "inventory", title: "organization",
 		about:            "Lists the organizations of the token's privileges, with the role the token has in each. No org needs to be selected.",
 		examples:         []string{"get orgs", "get orgs -o wide"},
-		describe:         "Prints the org settings and its counters (sites, devices, connected and disconnected devices, inventory).",
+		describe:         "Prints the org object (GET /orgs/{org_id}) and its counters (sites, devices, connected and disconnected devices, inventory). This is the org itself, not the org settings endpoint.",
 		describeExamples: []string{"describe org ACME", "describe org ACME -o json"},
 	},
 	"sites": {
 		group: "inventory", title: "site",
 		examples:         []string{"get sites", "get sites -o wide", "get site HQ -o yaml"},
-		describe:         "Prints the site settings and its counters (connected APs, switches and gateways, clients).",
+		describe:         "Prints the site object (GET /sites/{site_id}) and its counters (connected APs, switches and gateways, clients). This is the site itself, not its settings or derived settings.",
 		describeExamples: []string{"describe site HQ"},
 	},
 	"devices": {
@@ -69,15 +69,16 @@ the API for APs, switches and gateways.`,
 	},
 	"clients": {
 		group: "inventory", title: "client",
-		about: `With a site, wireless clients are the ones connected right now. Without a
-site (or with -A), and for wired clients, the list is a search over
---duration. A MAC seen both wireless and wired is one row.`,
+		about: `With a site, wireless clients are the ones connected right now (current
+state). Without a site (or with -A), and for wired clients, the list is a
+historical search over --duration. A MAC seen both wireless and wired is one
+row.`,
 		examples: []string{
 			"get clients --site HQ",
 			"get clients --site HQ --type wired -o wide",
 			"get clients -A --duration 7d",
 		},
-		describe:         "Prints everything known about one client: its wireless and wired views, or one of them with --type. NAME is the MAC address of the client, which must have been seen in the last 7 days.",
+		describe:         "Prints everything known about one client: its wireless and wired views, or one of them with --type. NAME is the MAC address of the client. The client is found with an org-wide client search over --duration (default 7d); for a wireless client, its current stats are then read on the site it was last seen on. When those stats cannot be read (permissions, rate limit, service error), State says so instead of \"not connected\".",
 		describeOrgWide:  true,
 		describeExamples: []string{"describe client aa:bb:cc:dd:ee:ff", "describe client aa:bb:cc:dd:ee:ff --type wired"},
 	},
@@ -183,8 +184,10 @@ WLANs plus the ones inherited from templates.`,
 		short: "Device, client or system events during a time window",
 		about: `Searches events during --duration (default 1d), newest first. --source picks
 the kind of events: device (default), client (wireless client events) or
-system (configuration and audit-style events). Only the newest --limit events
-are fetched (default 1000); pass --limit 0 for all of them.`,
+system (configuration and audit-style events). --limit caps the number of
+events shown (default 1000, the newest ones); pass --limit 0 for all of them.
+Org-wide system events have no API type filter: --type is applied locally and
+mistctl reads further pages until --limit matching events are found.`,
 		examples: []string{
 			"get events --site HQ",
 			"get events --device sw-core --type SW_PORT_DOWN --duration 7d",
@@ -314,9 +317,10 @@ func (r *resource) getLong() string {
 		keys = orList(labels)
 	}
 	parts = append(parts, wrap(fmt.Sprintf("NAME: when given, only the rows whose %s equals one of the NAMEs are shown.", keys)))
-	out := "Output: -o json and -o yaml print every field returned by the API."
+	structured := "-o json and -o yaml print the API objects with every field (search\nresults without their envelope, plus fields mistctl adds such as site_name);\n-o name prints one identifier per row."
+	out := "Output: " + structured
 	if wide := r.wideHeaders(); len(wide) > 0 {
-		out = wrap("Output: -o wide adds the columns "+strings.Join(wide, ", ")+".") + "\n-o json and -o yaml print every field returned by the API."
+		out = wrap("Output: -o wide adds the columns "+strings.Join(wide, ", ")+".") + "\n" + structured
 	}
 	parts = append(parts, out)
 	if r.Describe != nil {

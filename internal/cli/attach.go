@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tmunzer-AIDE/mistctl/internal/client"
+	"github.com/tmunzer-AIDE/mistctl/internal/output"
 	"github.com/tmunzer-AIDE/mistctl/internal/shell"
 	"github.com/tmunzer-AIDE/mistctl/internal/term"
 )
@@ -78,9 +79,9 @@ func (a *app) attach(ctx context.Context, name, node string) error {
 	if err != nil {
 		return err
 	}
-	label := e.Name
+	label := output.Safe(e.Name)
 	if label == "" {
-		label = name
+		label = output.Safe(name)
 	}
 	switch e.Type {
 	case "switch", "gateway", "":
@@ -138,7 +139,7 @@ func (a *app) attach(ctx context.Context, name, node string) error {
 	err = shell.Run(context.WithoutCancel(ctx), shell.Options{
 		URL:        wsURL,
 		Header:     cl.ShellHeader(wsURL),
-		HTTPClient: &http.Client{Transport: client.BaseTransport},
+		HTTPClient: client.ShellHTTPClient(),
 		Stdin:      attachStdin,
 		Stdout:     attachOut,
 		Size:       tty.Size,
@@ -188,7 +189,7 @@ func writableRoles(raw json.RawMessage, orgID, siteID string) []string {
 			if name == "" {
 				name = scope
 			}
-			out = append(out, fmt.Sprintf("%s %s (%s)", scope, name, role))
+			out = append(out, output.Safe(fmt.Sprintf("%s %s (%s)", scope, name, role)))
 		}
 	}
 	return out
