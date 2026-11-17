@@ -73,7 +73,7 @@ mistctl describe client aa:bb:cc:dd:ee:ff -o json
 | `orgs` | `org` | token | `/self`, `/orgs/{id}`, `/orgs/{id}/stats` |
 | `sites` | `site` | org | `/orgs/{id}/sites`, `/sites/{id}`, `/sites/{id}/stats` |
 | `devices` | `device`, `dev` | org or site | `/orgs/{id}/stats/devices`, `/sites/{id}/stats/devices`, `/sites/{id}/devices/{id}` |
-| `clients` | `client`, `cl` | org or site | Wireless: `/sites/{id}/stats/clients` (connected now, with a site) or `/orgs/{id}/clients/search`; wired: `/orgs/{id}/wired_clients/search` or `/sites/{id}/wired_clients/search`. `--type wireless\|wired\|all`, `--duration` (default 1d) for searches |
+| `clients` | `client`, `cl` | org or site | A MAC seen both ways is one line with TYPE `wireless,wired` (wired records nested under `wired` in JSON); `describe client` shows both unless `--type` is set. Wireless: `/sites/{id}/stats/clients` (connected now, with a site) or `/orgs/{id}/clients/search`; wired: `/orgs/{id}/wired_clients/search` or `/sites/{id}/wired_clients/search`. `--type wireless\|wired\|all`, `--duration` (default 1d) for searches |
 
 Objects can be referred to by name, ID, or (devices and clients) MAC address in
 any format (`5c5b35000001`, `5C:5B:35:00:00:01`, `5c-5b-...`).

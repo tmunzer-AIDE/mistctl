@@ -36,6 +36,8 @@ type app struct {
 	noCache     bool
 	debug       bool
 
+	describeOpts *listOpts
+
 	out io.Writer
 	err io.Writer
 

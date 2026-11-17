@@ -103,7 +103,17 @@ func (f *fakeMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"detail":"expected duration=1d"}`, 400)
 			return
 		}
-		fmt.Fprintf(w, `{"results":[{"mac":"001122334455","dhcp_hostname":"printer","ip":["10.0.2.7"],"device_mac":["5c5b35000002"],"port_id":["ge-0/0/5"],"vlan":[20],"site_id":"%s","auth_state":"authenticated","timestamp":1794887387.5}],"total":1}`, siteHQ)
+		recs := map[string]string{
+			"001122334455": fmt.Sprintf(`{"mac":"001122334455","dhcp_hostname":"printer","ip":["10.0.2.7"],"device_mac":["5c5b35000002"],"port_id":["ge-0/0/5"],"vlan":[20],"site_id":"%s","auth_state":"authenticated","timestamp":1794887387.5}`, siteHQ),
+			"aabbccddeeff": fmt.Sprintf(`{"mac":"aabbccddeeff","ip":["10.0.1.5"],"device_mac":["5c5b35000002"],"port_id":["ge-0/0/1"],"vlan":[10],"site_id":"%s"}`, siteHQ),
+		}
+		var res []string
+		for _, m := range []string{"001122334455", "aabbccddeeff"} {
+			if q.Get("mac") == "" || q.Get("mac") == m {
+				res = append(res, recs[m])
+			}
+		}
+		fmt.Fprintf(w, `{"results":[%s],"total":%d}`, strings.Join(res, ","), len(res))
 	default:
 		w.WriteHeader(404)
 		fmt.Fprintf(w, `{"detail":"no route %s"}`, p)
@@ -353,6 +363,34 @@ func TestClientsWiredAndWireless(t *testing.T) {
 		t.Errorf("--type wireless returned wired clients:\n%s", out)
 	}
 	assertContains(t, run(t, "describe", "client", "00:11:22:33:44:55"), "Type:", "wired", "Device:", "sw-core", "Port:", "ge-0/0/5")
+
+	// the laptop is seen both ways: one merged line
+	out = run(t, "get", "clients", "--site", "HQ")
+	if n := strings.Count(out, "aabbccddeeff"); n != 1 {
+		t.Errorf("merged client listed %d times:\n%s", n, out)
+	}
+	assertContains(t, out, "wireless,wired")
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(run(t, "get", "clients", "--site", "HQ", "-o", "json")), &items); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range items {
+		if it["mac"] == "aabbccddeeff" {
+			if w, _ := it["wired"].([]any); len(w) != 1 {
+				t.Errorf("merged item missing wired records: %v", it)
+			}
+		}
+	}
+	// --type wired keeps it as a wired line
+	assertContains(t, run(t, "get", "clients", "--type", "wired"), "aabbccddeeff", "ge-0/0/1")
+	// describe shows both views unless --type narrows it
+	out = run(t, "describe", "client", "aabbccddeeff")
+	assertContains(t, out, "wireless,wired", "Wired port:", "ge-0/0/1", "wireless:", "wired:")
+	out = run(t, "describe", "client", "aabbccddeeff", "--type", "wireless")
+	if strings.Contains(out, "Wired port") || strings.Contains(out, "wired:") {
+		t.Errorf("--type wireless still shows wired data:\n%s", out)
+	}
+	assertContains(t, run(t, "describe", "client", "aabbccddeeff", "--type", "wired"), "Type:", "wired", "ge-0/0/1")
 	if _, err := runErr("get", "clients", "--type", "bluetooth"); err == nil {
 		t.Error("expected invalid --type error")
 	}

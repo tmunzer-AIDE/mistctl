@@ -37,6 +37,9 @@ type resource struct {
 	Flags     func(fs *pflag.FlagSet, o *listOpts)
 	List      func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error)
 	Describe  func(ctx context.Context, a *app, name string) (*described, error)
+	// DescribeFlags adds resource-specific flags to `describe`; values are
+	// available to Describe through a.describeOpts.
+	DescribeFlags func(fs *pflag.FlagSet, o *listOpts)
 	// Enrich adds derived fields (e.g. site_name) before printing.
 	Enrich func(ctx context.Context, a *app, items []json.RawMessage) []json.RawMessage
 	// EnrichAlways runs Enrich for the default table too (when a default

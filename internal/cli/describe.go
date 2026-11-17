@@ -24,13 +24,15 @@ With -o json or -o yaml only the full document is printed.`,
 	}
 	for _, r := range registry {
 		r := r
-		cmd.AddCommand(&cobra.Command{
+		o := &listOpts{}
+		sub := &cobra.Command{
 			Use:               r.Singular + " NAME",
 			Aliases:           append([]string{r.Name}, r.Aliases...),
 			Short:             "Describe a " + r.Singular,
 			Args:              cobra.ExactArgs(1),
 			ValidArgsFunction: a.completeNames(r),
 			RunE: func(cmd *cobra.Command, args []string) error {
+				a.describeOpts = o
 				d, err := r.Describe(cmd.Context(), a, args[0])
 				if err != nil {
 					return err
@@ -45,7 +47,11 @@ With -o json or -o yaml only the full document is printed.`,
 				}
 				return output.WriteYAML(a.out, d.Doc)
 			},
-		})
+		}
+		if r.DescribeFlags != nil {
+			r.DescribeFlags(sub.Flags(), o)
+		}
+		cmd.AddCommand(sub)
 	}
 	return cmd
 }

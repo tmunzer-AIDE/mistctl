@@ -18,7 +18,9 @@ import (
 var clientTypes = []string{"all", "wireless", "wired"}
 
 // clientsResource merges wireless and wired clients. Each item gets a
-// "client_type" field (wireless|wired) appended to the raw API object.
+// "client_type" field (wireless, wired, or "wireless,wired") appended to the
+// raw API object. A MAC seen both ways is one item: the wireless object with
+// the wired record nested under "wired".
 //
 // Sources:
 //   - wireless, with a site: clients connected now (site stats)
@@ -52,7 +54,10 @@ func clientsResource() *resource {
 			fs.StringVar(&o.clientType, "type", "all", "client type: all, wireless, wired")
 			fs.StringVar(&o.duration, "duration", "1d", "search window for wired clients, and for wireless clients without --site (e.g. 1h, 1d, 7d)")
 		},
-		List:         listClients,
+		List: listClients,
+		DescribeFlags: func(fs *pflag.FlagSet, o *listOpts) {
+			fs.StringVar(&o.clientType, "type", "all", "client type: all, wireless, wired")
+		},
 		EnrichAlways: true,
 		Enrich: func(ctx context.Context, a *app, items []json.RawMessage) []json.RawMessage {
 			return addDeviceNames(ctx, a, addSiteNames(ctx, a, items))
@@ -65,32 +70,59 @@ func listClients(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, e
 	if !contains(clientTypes, o.clientType) {
 		return nil, fmt.Errorf("invalid --type %q (valid: %s)", o.clientType, strings.Join(clientTypes, ", "))
 	}
-	var out []json.RawMessage
+	var wireless, wired []json.RawMessage
+	var err error
 	if o.clientType != "wired" {
-		items, err := listWireless(ctx, a, o)
-		if err != nil {
+		if wireless, err = listWireless(ctx, a, o); err != nil {
 			return nil, err
 		}
-		out = append(out, tag(items, "wireless")...)
 	}
 	if o.clientType != "wireless" {
-		items, err := listWired(ctx, a, o)
-		if err != nil {
+		if wired, err = listWired(ctx, a, o); err != nil {
 			return nil, err
 		}
-		out = append(out, tag(items, "wired")...)
 	}
+	out := mergeClients(wireless, wired)
 	if o.limit > 0 && len(out) > o.limit {
 		out = out[:o.limit]
 	}
 	return out, nil
 }
 
-func tag(items []json.RawMessage, t string) []json.RawMessage {
-	for i := range items {
-		items[i] = appendField(items[i], "client_type", t)
+// mergeClients tags each client with its type and folds the wired records
+// of a MAC that is also a wireless client into that wireless record, under
+// "wired" (a list: the same MAC can be learnt on several switches). Wired-only
+// records are kept one per line as the API returns them.
+func mergeClients(wireless, wired []json.RawMessage) []json.RawMessage {
+	macOf := func(r json.RawMessage) string { return cache.NormalizeMAC(output.Text(output.Decode(r)["mac"])) }
+	wirelessMACs := map[string]bool{}
+	for _, w := range wireless {
+		if m := macOf(w); m != "" {
+			wirelessMACs[m] = true
+		}
 	}
-	return items
+	wiredByMAC := map[string][]json.RawMessage{}
+	var wiredOnly []json.RawMessage
+	for _, w := range wired {
+		if m := macOf(w); wirelessMACs[m] {
+			wiredByMAC[m] = append(wiredByMAC[m], w)
+		} else {
+			wiredOnly = append(wiredOnly, w)
+		}
+	}
+	out := make([]json.RawMessage, 0, len(wireless)+len(wiredOnly))
+	for _, w := range wireless {
+		if recs := wiredByMAC[macOf(w)]; len(recs) > 0 {
+			w = appendField(w, "client_type", "wireless,wired")
+			out = append(out, appendField(w, "wired", recs))
+			continue
+		}
+		out = append(out, appendField(w, "client_type", "wireless"))
+	}
+	for _, w := range wiredOnly {
+		out = append(out, appendField(w, "client_type", "wired"))
+	}
+	return out
 }
 
 func listWireless(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
@@ -160,22 +192,65 @@ func listWired(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, err
 
 var errClientNotFound = errors.New("client not found")
 
-// describeClient looks the MAC up as a wireless client first, then as a
-// wired client.
+// describeClient shows the wireless and/or wired view of a MAC. With
+// --type all (default) both are looked up and merged when both exist.
 func describeClient(ctx context.Context, a *app, name string) (*described, error) {
 	if !cache.IsMAC(name) {
 		return nil, fmt.Errorf("clients are identified by MAC address, got %q", name)
 	}
+	t := "all"
+	if a.describeOpts != nil && a.describeOpts.clientType != "" {
+		t = a.describeOpts.clientType
+	}
+	if !contains(clientTypes, t) {
+		return nil, fmt.Errorf("invalid --type %q (valid: %s)", t, strings.Join(clientTypes, ", "))
+	}
 	mac := cache.NormalizeMAC(name)
-	d, err := describeWireless(ctx, a, mac)
-	if !errors.Is(err, errClientNotFound) {
-		return d, err
+	var wl, wd *described
+	var err error
+	if t != "wired" {
+		if wl, err = describeWireless(ctx, a, mac); err != nil && !errors.Is(err, errClientNotFound) {
+			return nil, err
+		}
 	}
-	d, err = describeWired(ctx, a, mac)
-	if errors.Is(err, errClientNotFound) {
-		return nil, fmt.Errorf("client %s not seen in the last 7 days", name)
+	if t != "wireless" {
+		if wd, err = describeWired(ctx, a, mac); err != nil && !errors.Is(err, errClientNotFound) {
+			return nil, err
+		}
 	}
-	return d, err
+	switch {
+	case wl != nil && wd != nil:
+		return mergeDescribed(wl, wd), nil
+	case wl != nil:
+		return wl, nil
+	case wd != nil:
+		return wd, nil
+	}
+	label := "client"
+	if t != "all" {
+		label = t + " client"
+	}
+	return nil, fmt.Errorf("%s %s not seen in the last 7 days", label, name)
+}
+
+// mergeDescribed combines the wireless and wired views of one client.
+func mergeDescribed(wl, wd *described) *described {
+	header := make([][2]string, 0, len(wl.Header)+6)
+	for _, kv := range wl.Header {
+		if kv[0] == "Type" {
+			kv[1] = "wireless,wired"
+		}
+		header = append(header, kv)
+	}
+	for _, kv := range wd.Header {
+		switch kv[0] {
+		case "Device", "Device MAC", "Port", "Auth":
+			header = append(header, [2]string{"Wired " + strings.ToLower(kv[0]), kv[1]})
+		case "VLAN":
+			header = append(header, [2]string{"Wired VLAN", kv[1]})
+		}
+	}
+	return &described{Header: header, Doc: combine("wireless", wl.Doc, "wired", wd.Doc)}
 }
 
 func describeWireless(ctx context.Context, a *app, mac string) (*described, error) {
