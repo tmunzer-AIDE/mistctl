@@ -268,6 +268,10 @@ func TestEvents(t *testing.T) {
 	if len(c) != 1 || !strings.Contains(c[0], "mac=5c5b35000001") || !strings.Contains(c[0], "limit=1000") {
 		t.Errorf("device filter or default limit not passed: %v", c)
 	}
+	// The org search defaults device_type to "ap": all types must be asked for.
+	if !strings.Contains(c[0], "device_type=ap%2Cswitch%2Cgateway") {
+		t.Errorf("org device events must ask for every device type: %v", c)
+	}
 	assertContains(t, run(t, "get", "events", "--source", "client", "--site", "HQ"), "CLIENT_AUTHENTICATED", "ap-lobby", "Corp")
 	out = run(t, "get", "events", "--source", "system", "--type", "site_created")
 	assertContains(t, out, "SITE_CREATED")

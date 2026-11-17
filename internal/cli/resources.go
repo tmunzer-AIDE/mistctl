@@ -234,13 +234,14 @@ func orgsResource() *resource {
 			if err != nil {
 				return nil, err
 			}
-			entries := orgEntriesFromSelf(raw)
+			entries, mspOf := a.orgEntries(ctx, raw)
+			a.memoIndex(a.scopeKey(""), kindOrgs, entries)
 			_ = a.cache().Put(a.scopeKey(""), kindOrgs, entries)
 			var self struct {
 				Privileges []map[string]any `json:"privileges"`
 			}
 			_ = json.Unmarshal(raw, &self)
-			mspName := map[string]string{}
+			mspName := mspOf
 			for _, p := range self.Privileges {
 				if id, _ := p["org_id"].(string); id != "" {
 					if n, _ := p["msp_name"].(string); n != "" {
@@ -586,7 +587,7 @@ func listDeviceStats(ctx context.Context, a *app, o *listOpts) ([]json.RawMessag
 }
 
 func describeDevice(ctx context.Context, a *app, name string) (*described, error) {
-	e, err := a.lookup(ctx, kindDevices, name)
+	e, err := a.lookupDevice(ctx, name)
 	if err != nil {
 		// Mist Edges are not in the inventory: try them before giving up.
 		if d, merr := describeMxedge(ctx, a, name); merr == nil {

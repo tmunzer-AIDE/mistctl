@@ -129,7 +129,7 @@ mistctl get rrm --site HQ --band 5
 | `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current` (one row per band: APs per channel/power, noise, neighbors; `-o wide` adds the RF template limits, `-o json` keeps any per-AP plan under `aps`), `/sites/{id}/rrm/events` |
 | `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`) |
 | `bgp-peers`, `ospf-peers` | `bgp`, `ospf` | org or site | `/stats/bgp_peers/search`, `/stats/ospf_peers/search` with `--device`, `--vrf`, `--up`, `--neighbor`/`--peer`, `--start`/`--end` |
-| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`, `--port`, `--neighbor`, `--speed`, `--poe`, `--auth-state`, `--stp-state`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port |
+| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`, `--port`, `--neighbor`, `--speed`, `--poe`, `--auth-state`, `--stp-state`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port, breakout ports included (`sw-core:et-0/0/48:0`) |
 | `zones` | | site | `/sites/{id}/stats/zones` |
 | `tunnels` | `tun` | org or site | `/orgs/{id}/stats/tunnels/search` (`--type wan\|wxtunnel`, `--device`, `--up`, `--peer`) |
 
@@ -232,7 +232,7 @@ Release packages install completions automatically.
 
 - `mistctl api <path...>`: path-style access to every GET endpoint of the Mist
   OpenAPI spec, with completion from the spec and the cache.
-- More curated resources (licenses, labels and policies, MSP org discovery,
+- More curated resources (licenses, labels and policies,
   topology/LLDP, site-level templates, ...).
 
 ## Development

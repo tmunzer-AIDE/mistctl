@@ -29,7 +29,8 @@ osslsigncode sign \
   -pass "${WINDOWS_SIGN_PASSWORD:-}" \
   -n "mistctl" \
   -i "https://github.com/tmunzer-AIDE/mistctl" \
-  -t "http://timestamp.digicert.com" \
+  -h sha256 \
+  -ts "http://timestamp.digicert.com" \
   -in "$path" -out "$tmp/signed.exe"
 mv "$tmp/signed.exe" "$path"
 echo "sign-windows: signed $path"

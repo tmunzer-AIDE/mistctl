@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"time"
 
@@ -40,6 +41,8 @@ type Config struct {
 	// loaded is a hash of the file as read (nil when it did not exist), used
 	// by Save to detect a concurrent change.
 	loaded []byte
+	// insecureMode is the file mode when it exposes a stored token.
+	insecureMode os.FileMode
 }
 
 // DefaultCacheTTL is used when cache-ttl is not set.
@@ -82,7 +85,40 @@ func Load(path string) (*Config, error) {
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config %s: %w", path, err)
 	}
+	c.insecureMode = insecureMode(path, c)
 	return c, nil
+}
+
+// insecureMode returns the permission bits of a config file that stores a
+// token and can be read by other users (0 when it is fine, or on Windows,
+// where the mode bits say nothing about access).
+func insecureMode(path string, c *Config) os.FileMode {
+	if runtime.GOOS == "windows" {
+		return 0
+	}
+	stored := false
+	for _, ctx := range c.Contexts {
+		if ctx != nil && ctx.Token != "" {
+			stored = true
+		}
+	}
+	if !stored {
+		return 0
+	}
+	st, err := os.Stat(path)
+	if err != nil || st.Mode().Perm()&0o077 == 0 {
+		return 0
+	}
+	return st.Mode().Perm()
+}
+
+// PermissionWarning returns a message when the file holds a token and other
+// users can read it (mistctl writes it 0600, a hand-made file may not be).
+func (c *Config) PermissionWarning() string {
+	if c.insecureMode == 0 {
+		return ""
+	}
+	return fmt.Sprintf("warning: %s stores an API token and is readable by other users (mode %04o); run: chmod 600 %s", c.path, c.insecureMode, c.path)
 }
 
 // Validate checks the structure of the config.

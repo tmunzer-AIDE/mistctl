@@ -44,7 +44,9 @@ func New(c cloud.Cloud, token string, debug bool) (*Client, error) {
 	token = strings.TrimPrefix(token, "Token ")
 	cl := &Client{Cloud: c, Debug: debug, token: token}
 	tr := &guardTransport{base: BaseTransport, debug: debug, counter: &cl.Calls}
-	cfg := mistapi.CreateConfigurationFromEnvironment(
+	// Not CreateConfigurationFromEnvironment: stray MISTAPI_* variables
+	// (MISTAPI_ACCEPT, ...) must not change how mistctl talks to the API.
+	cfg := mistapi.CreateConfiguration(
 		mistapi.WithEnvironment(c.Env),
 		mistapi.WithApiTokenCredentials(mistapi.NewApiTokenCredentials("Token "+token)),
 		mistapi.WithHttpConfiguration(mistapi.NewHttpConfiguration(

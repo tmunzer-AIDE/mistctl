@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/tmunzer/mistapi-go/mistapi/models"
@@ -202,5 +203,43 @@ func TestSearchFilteredLimitsMatches(t *testing.T) {
 	})
 	if err != nil || len(items) != 1 || calls != 2 {
 		t.Fatalf("items=%v calls=%d err=%v", items, calls, err)
+	}
+}
+
+// Every hop of a redirect goes through the guard (and is counted).
+func TestRedirectHopsGoThroughTheGuard(t *testing.T) {
+	c, hits := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/self" {
+			http.Redirect(w, r, "/api/v1/self/moved", http.StatusFound)
+			return
+		}
+		fmt.Fprint(w, `{"email":"jane@example.com"}`)
+	})
+	raw, err := Call(context.Background(), c, c.SDK.SelfAccount().GetSelf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *hits != 2 || c.Calls != 2 {
+		t.Errorf("hits=%d guard calls=%d, want 2 and 2", *hits, c.Calls)
+	}
+	if string(raw.Body) != `{"email":"jane@example.com"}` {
+		t.Errorf("body = %s", raw.Body)
+	}
+}
+
+// Stray SDK environment variables must not change the requests.
+func TestSDKEnvironmentIsIgnored(t *testing.T) {
+	t.Setenv("MISTAPI_ACCEPT", "text/plain")
+	t.Setenv("MISTAPI_AUTHORIZATION", "Token from-env")
+	var accept, auth string
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		accept, auth = r.Header.Get("Accept"), r.Header.Get("Authorization")
+		fmt.Fprint(w, `{}`)
+	})
+	if _, err := Call(context.Background(), c, c.SDK.SelfAccount().GetSelf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(accept, "text/plain") || auth != "Token tok" {
+		t.Errorf("Accept=%q Authorization=%q", accept, auth)
 	}
 }

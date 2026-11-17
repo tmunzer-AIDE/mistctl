@@ -8,7 +8,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -24,6 +27,8 @@ var (
 	newTerminal           = func() term.Terminal { return term.OS{} }
 	attachStdin io.Reader = os.Stdin
 	attachOut   io.Writer = os.Stdout
+	// attachSignals end a shell session cleanly (terminal restored).
+	attachSignals = []os.Signal{syscall.SIGTERM, syscall.SIGHUP}
 )
 
 func newAttachCmd(a *app) *cobra.Command {
@@ -75,7 +80,7 @@ func (a *app) completeAttach(cmd *cobra.Command, args []string, toComplete strin
 }
 
 func (a *app) attach(ctx context.Context, name, node string) error {
-	e, err := a.lookup(ctx, kindDevices, name)
+	e, err := a.lookupDevice(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -129,14 +134,23 @@ func (a *app) attach(ctx context.Context, name, node string) error {
 		return fmt.Errorf("could not create the shell session: %w", err)
 	}
 
-	restore, err := tty.MakeRaw()
+	rawRestore, err := tty.MakeRaw()
 	if err != nil {
 		return fmt.Errorf("could not set the terminal in raw mode: %w", err)
 	}
+	// Restore the terminal exactly once, also when this function panics.
+	var once sync.Once
+	restore := func() { once.Do(rawRestore) }
+	defer restore()
+	// In raw mode Ctrl-C goes to the device, but a SIGTERM or SIGHUP (kill,
+	// closed terminal) would otherwise end the process with the terminal
+	// still raw: end the session cleanly instead.
+	sctx, stop := signal.NotifyContext(context.WithoutCancel(ctx), attachSignals...)
+	defer stop()
 	fmt.Fprintf(a.err, "Connecting to %s (%s)... type \"exit\" or \"~.\" at the start of a line to quit.\r\n", label, orDash(e.Type))
 
 	// The shell outlives the default command timeout.
-	err = shell.Run(context.WithoutCancel(ctx), shell.Options{
+	err = shell.Run(sctx, shell.Options{
 		URL:        wsURL,
 		Header:     cl.ShellHeader(wsURL),
 		HTTPClient: client.ShellHTTPClient(),
@@ -150,6 +164,8 @@ func (a *app) attach(ctx context.Context, name, node string) error {
 	case errors.Is(err, shell.ErrEscape):
 		fmt.Fprintln(a.err, "\nSession closed.")
 		return nil
+	case sctx.Err() != nil:
+		return errors.New("session terminated by a signal")
 	case err != nil:
 		return err
 	}

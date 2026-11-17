@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -67,6 +68,9 @@ names are resolved when a command runs.`,
 				return err
 			}
 			name := args[0]
+			if err := checkContextName(name); err != nil {
+				return err
+			}
 			c, exists := cfg.Contexts[name]
 			if !exists {
 				c = &config.Context{Cloud: "global01"}
@@ -216,11 +220,29 @@ func tokenSource(c *config.Context) string {
 	return "-"
 }
 
+// redact shows only the last 4 characters of a token: enough to tell two
+// tokens apart, too little to help guess one from a screenshot or a log.
 func redact(tok string) string {
-	if len(tok) <= 8 {
+	if len(tok) < 16 {
 		return "****"
 	}
-	return tok[:4] + "…" + tok[len(tok)-4:]
+	return "…" + tok[len(tok)-4:]
+}
+
+// checkContextName refuses names that cannot be selected again later.
+func checkContextName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("the context name cannot be empty")
+	}
+	if name != strings.TrimSpace(name) {
+		return fmt.Errorf("invalid context name %q: no leading or trailing spaces", name)
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("invalid context name %q: control characters are not allowed", name)
+		}
+	}
+	return nil
 }
 
 func newCurrentContextCmd(a *app) *cobra.Command {

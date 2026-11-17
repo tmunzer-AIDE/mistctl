@@ -12,6 +12,9 @@ import (
 // now is a test seam.
 var now = time.Now
 
+// maxDuration bounds relative durations (about 10 years).
+const maxDuration = 10 * 365 * 24 * time.Hour
+
 // parseMistDuration parses a Mist-style relative duration: one or more
 // <number><unit> groups with units s, m, h, d (days) and w (weeks), e.g. 90m,
 // 1d, 2w, 1d12h. Go's time.ParseDuration does not know days or weeks.
@@ -47,7 +50,15 @@ func parseMistDuration(s string) (time.Duration, error) {
 		default:
 			return 0, fmt.Errorf("invalid duration %q: unknown unit %q (use s, m, h, d, w)", s, s[j])
 		}
+		// Bounded before multiplying, so a huge number can never overflow
+		// into a small or negative window.
+		if time.Duration(n) > maxDuration/unit {
+			return 0, fmt.Errorf("invalid duration %q: too long (the maximum is 10 years)", s)
+		}
 		total += time.Duration(n) * unit
+		if total > maxDuration {
+			return 0, fmt.Errorf("invalid duration %q: too long (the maximum is 10 years)", s)
+		}
 		i = j + 1
 	}
 	if total <= 0 {
@@ -124,6 +135,27 @@ func (o *listOpts) window() (window, error) {
 	}
 	s, e := strconv.FormatInt(start, 10), strconv.FormatInt(end, 10)
 	return window{start: &s, end: &e}, nil
+}
+
+// checkWindow validates the time flags without any API call, so a typo is
+// reported before the command spends requests resolving names.
+func (o *listOpts) checkWindow() error {
+	if o.duration != "" {
+		if _, err := parseMistDuration(o.duration); err != nil {
+			return fmt.Errorf("--duration: %w", err)
+		}
+	}
+	if o.start != "" {
+		if _, err := parseTime(o.start); err != nil {
+			return fmt.Errorf("--start: %w", err)
+		}
+	}
+	if o.end != "" {
+		if _, err := parseTime(o.end); err != nil {
+			return fmt.Errorf("--end: %w", err)
+		}
+	}
+	return nil
 }
 
 // parseTime reads an absolute time: epoch seconds, RFC 3339, or a local

@@ -10,9 +10,12 @@ project_name: mistctl
 
 before:
   hooks:
-    - go mod tidy
-    - go test ./...
-    - ./scripts/completions.sh
+    # No `go mod tidy` (it can change what is built) and no tests here: this
+    # runs with the signing and publishing secrets in the environment, so
+    # nothing that executes dependency code belongs in it. Tests run in
+    # their own job of the release workflow.
+    - go mod verify
+    - ./scripts/completions.sh --if-missing
 
 builds:
   - id: mistctl
@@ -20,6 +23,7 @@ builds:
     binary: mistctl
     env:
       - CGO_ENABLED=0
+      - GOFLAGS=-mod=readonly
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     flags: [-trimpath]

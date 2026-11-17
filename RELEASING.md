@@ -120,6 +120,22 @@ Then:
    `scoop bucket add mistctl https://github.com/tmunzer-AIDE/scoop-bucket`
    then `scoop install mistctl`.
 
+## How the release workflow is hardened
+
+- Tests run in a separate `test` job that holds no secret and a read-only
+  token. The `goreleaser` job, which holds the signing and publishing
+  secrets, runs no test and no `go mod tidy`: only `go mod verify`, the
+  build (`-mod=readonly`) and the publishers. Shell completions (`go run`)
+  are generated in a step before the secrets are in scope.
+- Every action is pinned to a commit SHA, and GoReleaser, syft and
+  govulncheck to exact versions. Dependabot bumps the action SHAs; bump the
+  GoReleaser version (`version:` in `ci.yml` and `release.yml`) by hand.
+- `checksums.txt` gets a build provenance attestation. Anyone can check a
+  download with `gh attestation verify <file> -R tmunzer-AIDE/mistctl`.
+  Attestations need a public repository (or a paid plan): on a private repo
+  the step fails without failing the release.
+- Windows binaries are timestamped with RFC 3161 (`osslsigncode -ts`).
+
 ## Local dry run
 
 ```sh

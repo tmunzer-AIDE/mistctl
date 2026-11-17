@@ -3,11 +3,14 @@ package shell
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -185,5 +188,107 @@ func TestRunHandshakeError(t *testing.T) {
 	err := Run(context.Background(), Options{URL: "ws" + strings.TrimPrefix(srv.URL, "http"), Stdin: strings.NewReader(""), Stdout: io.Discard})
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("Run = %v, want a 401 handshake error", err)
+	}
+}
+
+// A failed dial must not print the query of the URL (a session secret).
+func TestDialErrorHidesQuery(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	srv.Close() // nothing listens there any more
+	err := Run(context.Background(), Options{
+		URL:    "ws://" + addr + "/ws?session=SECRET123#frag",
+		Stdin:  strings.NewReader(""),
+		Stdout: io.Discard,
+	})
+	if err == nil {
+		t.Fatal("expected a dial error")
+	}
+	if strings.Contains(err.Error(), "SECRET123") || !strings.Contains(err.Error(), addr+"/ws") {
+		t.Fatalf("dial error = %v", err)
+	}
+}
+
+// blackhole is a TCP proxy that can start dropping what the client sends,
+// like a connection that died without a close (sleep, network change).
+func blackhole(t *testing.T, target string, dead *atomic.Bool) string {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			up, err := net.Dial("tcp", target)
+			if err != nil {
+				c.Close()
+				return
+			}
+			t.Cleanup(func() { c.Close(); up.Close() })
+			go func() { _, _ = io.Copy(c, up) }()
+			go func() {
+				buf := make([]byte, 4096)
+				for {
+					n, err := c.Read(buf)
+					if n > 0 && !dead.Load() {
+						_, _ = up.Write(buf[:n])
+					}
+					if err != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// A server that answered pings and then goes silent ends the session.
+func TestKeepaliveDetectsDeadConnection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		for { // reading is what answers pings
+			if _, _, err := c.Read(context.Background()); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+	var dead atomic.Bool
+	addr := blackhole(t, strings.TrimPrefix(srv.URL, "http://"), &dead)
+	inR, inW := io.Pipe()
+	defer inW.Close()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- Run(context.Background(), Options{
+			URL:          "ws://" + addr,
+			Stdin:        inR,
+			Stdout:       io.Discard,
+			PingInterval: 20 * time.Millisecond,
+			PingTimeout:  200 * time.Millisecond,
+		})
+	}()
+	time.Sleep(200 * time.Millisecond) // a few pings answered
+	select {
+	case err := <-errc:
+		t.Fatalf("session ended while the server was alive: %v", err)
+	default:
+	}
+	dead.Store(true)
+	select {
+	case err := <-errc:
+		if !errors.Is(err, ErrLost) {
+			t.Fatalf("expected ErrLost, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a dead connection was not detected")
 	}
 }

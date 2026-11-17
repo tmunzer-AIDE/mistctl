@@ -47,6 +47,10 @@ type app struct {
 	target *target
 	cl     *client.Client
 	store  *cache.Store
+	// idx memoises the name/ID indexes fetched or stored by this process
+	// (key: scope + kind), so one command never lists the inventory or the
+	// sites twice, with or without --no-cache.
+	idx map[string][]cache.Entry
 }
 
 // target is the fully resolved context used for API calls.
