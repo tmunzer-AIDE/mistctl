@@ -307,9 +307,10 @@ func TestCacheAvoidsRepeatCalls(t *testing.T) {
 	run(t, "get", "devices", "--site", "HQ")
 	n := count()
 	run(t, "get", "devices", "--site", "HQ")
-	// second run only needs the device stats call: org and site come from cache
-	if got := count() - n; got != 1 {
-		t.Errorf("expected 1 API call with warm cache, got %d", got)
+	// second run only needs the device and Mist Edge stats calls: org and
+	// site come from cache
+	if got := count() - n; got != 2 {
+		t.Errorf("expected 2 API calls with warm cache, got %d", got)
 	}
 	n = count()
 	run(t, "--no-cache", "get", "devices", "--site", "HQ")

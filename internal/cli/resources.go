@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -21,6 +22,14 @@ type listOpts struct {
 	status     string
 	duration   string
 	clientType string
+	group      string // alarms
+	severity   string // alarms
+	eventType  string // alarms, events
+	source     string // events: device, client, system
+	device     string // device name or MAC filter
+	vrf        string // bgp-peers, ospf-peers
+	sle        string // sles: wifi, wired, wan
+	band       string // rrm
 }
 
 // resource is one curated Mist object type.
@@ -45,6 +54,18 @@ type resource struct {
 	// EnrichAlways runs Enrich for the default table too (when a default
 	// column depends on it).
 	EnrichAlways bool
+	// ColumnsFor overrides Columns when the columns depend on flags.
+	ColumnsFor func(o *listOpts) []output.Column
+	// MatchKeys are the fields `get RESOURCE NAME` compares NAME with
+	// (default: name, hostname, id, and mac for MAC-looking queries).
+	MatchKeys []string
+	// SortDesc sorts the table by this numeric field, newest first, instead
+	// of by the first column (used for time-ordered resources).
+	SortDesc string
+	// DefaultLimit is the default of --limit (0 = all).
+	DefaultLimit int
+	// FlagValues lists the accepted values of enum flags, for completion.
+	FlagValues map[string][]string
 }
 
 // described is the result of `describe`.
@@ -76,7 +97,21 @@ func findResource(name string) (*resource, error) {
 }
 
 func init() {
-	registry = []*resource{orgsResource(), sitesResource(), devicesResource(), clientsResource()}
+	registry = []*resource{
+		orgsResource(), sitesResource(), devicesResource(), clientsResource(),
+		// configuration objects
+		wlansResource(), wlanTemplatesResource(),
+		orgTemplateResource("rftemplates", "rftemplate", "RF templates", "/rftemplates", listOrgRfTemplates),
+		orgTemplateResource("aptemplates", "aptemplate", "AP templates", "/aptemplates", listOrgApTemplates),
+		orgTemplateResource("networktemplates", "networktemplate", "Switch (network) templates", "/networktemplates", listOrgNetworkTemplates),
+		orgTemplateResource("gatewaytemplates", "gatewaytemplate", "WAN edge (gateway) templates", "/gatewaytemplates", listOrgGatewayTemplates),
+		networksResource(), servicesResource(), evpnTopologiesResource(),
+		mapsResource(), mapstacksResource(),
+		// monitoring
+		alarmsResource(), eventsResource(), slesResource(), rrmResource(), rrmEventsResource(),
+		// stats
+		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(),
+	}
 }
 
 // ---- orgs -----------------------------------------------------------------
@@ -265,14 +300,14 @@ func (a *app) listInventory(ctx context.Context, org uuid.UUID) ([]json.RawMessa
 	})
 }
 
-var deviceTypes = []string{"all", "ap", "switch", "gateway"}
+var deviceTypes = []string{"all", "ap", "switch", "gateway", "mxedge"}
 
 func devicesResource() *resource {
 	return &resource{
 		Name: "devices", Singular: "device", Aliases: []string{"dev", "devs"},
-		Short:     "Devices (APs, switches, gateways) with their live status",
+		Short:     "Devices (APs, switches, gateways, Mist Edges) with their live status",
 		Scope:     "org/site",
-		Endpoint:  "GET /api/v1/orgs/{org_id}/stats/devices, GET /api/v1/sites/{site_id}/stats/devices, GET /api/v1/sites/{site_id}/devices/{device_id}, GET /api/v1/orgs/{org_id}/inventory",
+		Endpoint:  "GET /api/v1/orgs/{org_id}/stats/devices, GET /api/v1/sites/{site_id}/stats/devices, GET /api/v1/sites/{site_id}/devices/{device_id}, GET /api/v1/orgs/{org_id}/inventory, GET /api/v1/orgs/{org_id}/stats/mxedges, GET /api/v1/sites/{site_id}/stats/mxedges",
 		IndexKind: kindDevices,
 		Columns: []output.Column{
 			output.Col("NAME", "name", "hostname", "mac"),
@@ -290,7 +325,7 @@ func devicesResource() *resource {
 			output.Col("ID", "id").AsWide(),
 		},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
-			fs.StringVar(&o.devType, "type", "all", "device type: all, ap, switch, gateway")
+			fs.StringVar(&o.devType, "type", "all", "device type: all, ap, switch, gateway, mxedge")
 			fs.StringVar(&o.status, "status", "", "filter by status: connected, disconnected")
 		},
 		List: func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
@@ -300,45 +335,75 @@ func devicesResource() *resource {
 			if o.status != "" && o.status != "connected" && o.status != "disconnected" {
 				return nil, fmt.Errorf("invalid --status %q (valid: connected, disconnected)", o.status)
 			}
-			cl, err := a.client()
+			if o.devType == "mxedge" {
+				return listMxedgeDevices(ctx, a, o, o.limit)
+			}
+			items, err := listDeviceStats(ctx, a, o)
+			if err != nil || o.devType != "all" || (o.limit > 0 && len(items) >= o.limit) {
+				return items, err
+			}
+			// "all" includes Mist Edges. Orgs without Mist Edges (or tokens
+			// without access to them) just get the other devices.
+			max := 0
+			if o.limit > 0 {
+				max = o.limit - len(items)
+			}
+			edges, err := listMxedgeDevices(ctx, a, o, max)
+			var apiErr *client.APIError
+			if errors.As(err, &apiErr) && (apiErr.Status == 403 || apiErr.Status == 404) {
+				return items, nil
+			}
 			if err != nil {
 				return nil, err
 			}
-			site, hasSite, err := a.siteID(ctx)
-			if err != nil {
-				return nil, err
-			}
-			if hasSite {
-				var status *models.StatDeviceStatusFilterEnum
-				if o.status != "" {
-					s := models.StatDeviceStatusFilterEnum(o.status)
-					status = &s
-				}
-				return client.ListAll(ctx, o.limit, func(ctx context.Context, limit, page int) (client.Raw, error) {
-					return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.StatsDevice], error) {
-						return cl.SDK.SitesStatsDevices().ListSiteDevicesStats(ctx, site, &o.devType, status, &limit, &page)
-					})
-				})
-			}
-			org, err := a.orgID(ctx)
-			if err != nil {
-				return nil, err
-			}
-			t := models.DeviceEnumWithAllEnum(o.devType)
-			return client.ListAll(ctx, o.limit, func(ctx context.Context, limit, page int) (client.Raw, error) {
-				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.StatsDevice], error) {
-					return cl.SDK.OrgsStatsDevices().ListOrgDevicesStats(ctx, org, &t, client.Ptr(o.status), nil, nil, nil, nil, nil, nil, nil, nil, &limit, &page)
-				})
-			})
+			return append(items, edges...), nil
 		},
 		Enrich:   addSiteNames,
 		Describe: describeDevice,
 	}
 }
 
+// listDeviceStats lists AP, switch and gateway stats (site or org scope).
+func listDeviceStats(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+	cl, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	site, hasSite, err := a.siteID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if hasSite {
+		var status *models.StatDeviceStatusFilterEnum
+		if o.status != "" {
+			s := models.StatDeviceStatusFilterEnum(o.status)
+			status = &s
+		}
+		return client.ListAll(ctx, o.limit, func(ctx context.Context, limit, page int) (client.Raw, error) {
+			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.StatsDevice], error) {
+				return cl.SDK.SitesStatsDevices().ListSiteDevicesStats(ctx, site, &o.devType, status, &limit, &page)
+			})
+		})
+	}
+	org, err := a.orgID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	t := models.DeviceEnumWithAllEnum(o.devType)
+	return client.ListAll(ctx, o.limit, func(ctx context.Context, limit, page int) (client.Raw, error) {
+		return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.StatsDevice], error) {
+			return cl.SDK.OrgsStatsDevices().ListOrgDevicesStats(ctx, org, &t, client.Ptr(o.status), nil, nil, nil, nil, nil, nil, nil, nil, &limit, &page)
+		})
+	})
+}
+
 func describeDevice(ctx context.Context, a *app, name string) (*described, error) {
 	e, err := a.lookup(ctx, kindDevices, name)
 	if err != nil {
+		// Mist Edges are not in the inventory: try them before giving up.
+		if d, merr := describeMxedge(ctx, a, name); merr == nil {
+			return d, nil
+		}
 		return nil, err
 	}
 	if e.SiteID == "" {
