@@ -355,22 +355,28 @@ var rrmBands = []string{"24", "5", "6"}
 func rrmResource() *resource {
 	return &resource{
 		Name: "rrm", Singular: "rrm", Aliases: []string{"channels", "channel-plan"},
-		Short:    "Current RRM channel plan of a site: channel, width and power per AP radio",
+		Short:    "RRM state of a site, one row per band: channel and power distribution, noise, neighbors",
 		Scope:    "site",
 		Endpoint: "GET /api/v1/sites/{site_id}/rrm/current",
 		Columns: []output.Column{
-			output.Col("AP", "device_name", "device"),
 			output.Col("BAND", "band"),
-			output.Col("CHANNEL", "channel"),
-			output.Col("BANDWIDTH", "bandwidth"),
-			output.Col("POWER", "power"),
-			output.Col("USAGE", "usage"),
-			output.Col("CURR-CHANNEL", "curr_channel").AsWide(),
-			output.Col("CURR-BANDWIDTH", "curr_bandwidth").AsWide(),
-			output.Col("CURR-POWER", "curr_power").AsWide(),
-			output.Col("DEVICE", "device").AsWide(),
+			output.Col("STATUS", "status"),
+			output.Col("APS-PER-CHANNEL", "naps_by_channel").WithFormat(countsByKey),
+			output.Col("APS-PER-POWER", "naps_by_power").WithFormat(countsByKey),
+			output.Col("NOISE", "noise"),
+			output.Col("NEIGHBORS", "neighbors"),
+			output.Col("CO-CHANNEL", "cochannel_neighbors"),
+			output.Col("UNIFORMITY", "channel_distribution_uniformity").WithFormat(percent),
+			output.Col("INTERFERENCE", "interferences").WithFormat(interferences).AsWide(),
+			output.Col("DENSITY", "density").AsWide(),
+			output.Col("ALLOWED-CHANNELS", "template.channels").AsWide(),
+			output.Col("BANDWIDTH", "template.bandwidth").AsWide(),
+			output.Col("POWER-RANGE", "power_range").AsWide(),
+			output.Col("PLANNED-RADIOS", "aps").WithFormat(count).AsWide(),
+			output.Col("RF-TEMPLATE", "rftemplate_name").AsWide(),
+			output.Col("AGE", "timestamp").WithFormat(output.Age).AsWide(),
 		},
-		MatchKeys:  []string{"device_name", "device"},
+		MatchKeys:  []string{"band"},
 		FlagValues: map[string][]string{"band": rrmBands},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.band, "band", "", "only this band: 24, 5, 6")
@@ -393,55 +399,157 @@ func rrmResource() *resource {
 			if err != nil {
 				return nil, err
 			}
-			return flattenRrm(r.Body, o.band, a.deviceNames(ctx), o.limit), nil
+			return rrmBandRows(r.Body, o.band, a.deviceNames(ctx)), nil
 		},
 	}
 }
 
-// flattenRrm turns {"band_5": {"<ap>": {...}}, ...} into one row per radio.
-func flattenRrm(body json.RawMessage, band string, names map[string]string, max int) []json.RawMessage {
+// rrmBandRows turns the rrm/current document into one row per band:
+// {"band", "status", <band_X_metric fields>, "template": <rftemplate.band_X>,
+// "rftemplate_name", "timestamp", "aps": [per-AP plan entries, if any]}.
+func rrmBandRows(body json.RawMessage, band string, names map[string]string) []json.RawMessage {
 	var plan map[string]json.RawMessage
 	_ = json.Unmarshal(body, &plan)
+	var rf map[string]json.RawMessage
+	_ = json.Unmarshal(plan["rftemplate"], &rf)
 	var out []json.RawMessage
 	for _, b := range rrmBands {
 		if band != "" && band != b {
 			continue
 		}
+		metric, hasMetric := plan["band_"+b+"_metric"]
 		var radios map[string]json.RawMessage
-		if json.Unmarshal(plan["band_"+b], &radios) != nil {
+		_ = json.Unmarshal(plan["band_"+b], &radios)
+		if (!hasMetric || string(metric) == "null") && len(radios) == 0 {
 			continue
 		}
-		devices := make([]string, 0, len(radios))
-		for d := range radios {
-			devices = append(devices, d)
+		row := json.RawMessage(`{"band":` + string(mustJSON(b)) + `}`)
+		if len(plan["status"]) > 0 {
+			row = appendRaw(row, "status", plan["status"])
 		}
-		sort.Strings(devices)
-		for _, d := range devices {
-			row := radioRow(d, b, radios[d])
-			n := names[d] // keyed by device ID
-			if n == "" {
-				n = names[cache.NormalizeMAC(d)] // or by MAC
+		row = mergeFields(row, metric)
+		if t := rf["band_"+b]; len(t) > 0 && string(t) != "null" {
+			row = appendRaw(row, "template", t)
+			tm := output.Decode(t)
+			if lo, hi := output.Text(tm["power_min"]), output.Text(tm["power_max"]); lo != "" && hi != "" {
+				row = appendField(row, "power_range", lo+"-"+hi)
 			}
-			if n != "" {
-				row = appendField(row, "device_name", n)
-			}
-			out = append(out, row)
 		}
-	}
-	if max > 0 && len(out) > max {
-		out = out[:max]
+		for _, k := range []string{"rftemplate_name", "rftemplate_id", "timestamp"} {
+			if len(plan[k]) > 0 {
+				row = appendRaw(row, k, plan[k])
+			}
+		}
+		if len(radios) > 0 {
+			devices := make([]string, 0, len(radios))
+			for d := range radios {
+				devices = append(devices, d)
+			}
+			sort.Strings(devices)
+			aps := make([]json.RawMessage, 0, len(devices))
+			for _, d := range devices {
+				ap := mergeFields(json.RawMessage(`{"device":`+string(mustJSON(d))+`}`), radios[d])
+				n := names[d] // keyed by device ID
+				if n == "" {
+					n = names[cache.NormalizeMAC(d)] // or by MAC
+				}
+				if n != "" {
+					ap = appendField(ap, "device_name", n)
+				}
+				aps = append(aps, ap)
+			}
+			row = appendRaw(row, "aps", mustJSON(aps))
+		}
+		out = append(out, row)
 	}
 	return out
 }
 
-// radioRow builds {"device": d, "band": b, <fields of radio>}.
-func radioRow(device, band string, radio json.RawMessage) json.RawMessage {
-	head := `{"device":` + string(mustJSON(device)) + `,"band":` + string(mustJSON(band))
-	inner := strings.TrimSpace(string(radio))
-	if strings.HasPrefix(inner, "{") && strings.TrimSpace(inner[1:]) != "}" {
-		return json.RawMessage(head + "," + inner[1:])
+// appendRaw adds a key with an already-encoded JSON value to an object.
+func appendRaw(obj json.RawMessage, key string, value json.RawMessage) json.RawMessage {
+	s := strings.TrimRight(string(obj), " \n\t")
+	body := strings.TrimSpace(s[:len(s)-1])
+	sep := ","
+	if strings.HasSuffix(body, "{") {
+		sep = ""
 	}
-	return json.RawMessage(head + "}")
+	return json.RawMessage(body + sep + string(mustJSON(key)) + ":" + string(value) + "}")
+}
+
+// mergeFields appends the fields of object b to object a, keeping order.
+func mergeFields(a, b json.RawMessage) json.RawMessage {
+	inner := strings.TrimSpace(string(b))
+	if !strings.HasPrefix(inner, "{") || strings.TrimSpace(inner[1:]) == "}" {
+		return a
+	}
+	s := strings.TrimRight(string(a), " \n\t")
+	body := strings.TrimSpace(s[:len(s)-1])
+	sep := ","
+	if strings.HasSuffix(body, "{") {
+		sep = ""
+	}
+	return json.RawMessage(body + sep + inner[1:])
+}
+
+// countsByKey renders {"1": 1.0, "6": 2.0} as "1:1 6:2", keys in numeric order.
+func countsByKey(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return output.Text(v)
+	}
+	keys := sortedNumericKeys(m)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+":"+strings.TrimSuffix(output.Text(m[k]), ".0"))
+	}
+	return strings.Join(parts, " ")
+}
+
+// interferences renders {"52": {"radar": 0.8}} as "52:radar".
+func interferences(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return output.Text(v)
+	}
+	keys := sortedNumericKeys(m)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		var kinds []string
+		if inner, ok := m[k].(map[string]any); ok {
+			for kind := range inner {
+				kinds = append(kinds, kind)
+			}
+			sort.Strings(kinds)
+		}
+		parts = append(parts, k+":"+strings.Join(kinds, "+"))
+	}
+	return strings.Join(parts, " ")
+}
+
+func sortedNumericKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := atoiOr(keys[i]), atoiOr(keys[j])
+		if a != b {
+			return a < b
+		}
+		return keys[i] < keys[j]
+	})
+	return keys
+}
+
+func atoiOr(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 1 << 30
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
 }
 
 // deviceNames maps device IDs and normalized MACs to names (cached index).

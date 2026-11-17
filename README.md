@@ -89,7 +89,7 @@ mistctl get rrm --site HQ --band 5
 | `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration`, `--group`, `--severity`, `--type` |
 | `events` | `ev` | org or site | device, client or system event searches (`--source`), with `--duration`, `--type`, `--device` |
 | `sles` | | org or site | `/orgs/{id}/insights/sites-sle` (`--sle wifi\|wired\|wan`), one row per site |
-| `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current`, `/sites/{id}/rrm/events` |
+| `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current` (one row per band: APs per channel/power, noise, neighbors; `-o wide` adds the RF template limits, `-o json` keeps any per-AP plan under `aps`), `/sites/{id}/rrm/events` |
 | `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`) |
 | `bgp-peers`, `ospf-peers` | `bgp`, `ospf` | org or site | `/stats/bgp_peers/search`, `/stats/ospf_peers/search` |
 | `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down` |

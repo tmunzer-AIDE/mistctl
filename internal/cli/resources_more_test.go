@@ -112,7 +112,11 @@ func (m *moreMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				{"site_id":"%s","num_aps":4,"coverage":0.5}],"total":2,"limit":1000,"page":1}`, siteHQ, siteLab)
 		}
 	case hq + "/rrm/current":
-		fmt.Fprintf(w, `{"band_24":{"%s":{"channel":6,"bandwidth":20,"power":10}},"band_5":{"%s":{"channel":36,"bandwidth":40,"power":17}},"status":"done"}`, apID, apID)
+		// shape seen on a live org: per-AP maps can be empty, metrics carry the data
+		fmt.Fprintf(w, `{"band_24":{},"band_24_metric":{"noise":-97.6,"cochannel_neighbors":0.0,"neighbors":0.8,"naps_by_channel":{"11":2.0,"1":1.0,"6":2.0},"naps_by_power":{"11":4.0,"18":1.0},"channel_distribution_uniformity":0.96,"interferences":{}},
+			"band_5":{"%s":{"channel":36,"bandwidth":40,"power":17}},"band_5_metric":{"noise":-88.4,"neighbors":0.4,"naps_by_channel":{"64":1.0,"36":1.0,"112":1.0},"naps_by_power":{"16":3.0},"channel_distribution_uniformity":1.0,"interferences":{"100":{"radar":0.8},"52":{"radar":0.8}}},
+			"band_6":{},"status":"ready","timestamp":1794880544.0,
+			"rftemplate":{"band_24":{"power_min":3,"power_max":11,"channels":[1,6,11],"bandwidth":20},"band_5":{"power_min":9,"power_max":16,"channels":[36,40],"bandwidth":40},"name":"DNT"},"rftemplate_name":"DNT"}`, apID)
 	case hq + "/rrm/events":
 		fmt.Fprint(w, `{"results":[{"ap":"5c5b35000001","band":"5","event":"interference","channel":40,"pre_channel":36,"power":15,"pre_power":17,"timestamp":1790000000}]}`)
 	case org + "/stats/mxedges":
@@ -281,12 +285,19 @@ func TestSles(t *testing.T) {
 func TestRrm(t *testing.T) {
 	setupMore(t)
 	out := run(t, "get", "rrm", "--site", "HQ")
-	assertContains(t, out, "ap-lobby", "24", "6", "36", "40", "17")
+	assertContains(t, out, "BAND", "ready", "1:1 6:2 11:2", "11:4 18:1", "-97.6", "96.0%", "36:1 64:1 112:1")
+	assertNotContains(t, out, "No rrm found")
+	out = run(t, "get", "rrm", "--site", "HQ", "-o", "wide")
+	assertContains(t, out, "3-11", "9-16", "DNT", "52:radar 100:radar", "1,6,11")
 	out = run(t, "get", "rrm", "--site", "HQ", "--band", "5")
-	assertNotContains(t, out, " 24 ")
+	assertNotContains(t, out, "-97.6")
 	var rows []map[string]any
 	if err := json.Unmarshal([]byte(run(t, "get", "rrm", "--site", "HQ", "-o", "json")), &rows); err != nil || len(rows) != 2 {
-		t.Fatalf("bad rrm json: %v %v", err, rows)
+		t.Fatalf("bad rrm json (want 2 bands, band_6 has no data): %v %v", err, rows)
+	}
+	aps, _ := rows[1]["aps"].([]any)
+	if len(aps) != 1 || aps[0].(map[string]any)["device_name"] != "ap-lobby" {
+		t.Errorf("per-AP plan not kept under aps: %v", rows[1])
 	}
 	assertContains(t, run(t, "get", "rrm-events", "--site", "HQ"), "interference", "ap-lobby", "40", "36")
 	if _, err := runErr("get", "rrm"); err == nil {
