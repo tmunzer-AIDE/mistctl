@@ -1,12 +1,13 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
 
-func lt(mac, port, parent, when string) learnt {
-	return learnt{swPort: swPort{mac, port}, parent: parent, when: parseWhen(when)}
+func lt(mac, port, when string) learnt {
+	return learnt{swPort: swPort{mac, port}, when: parseWhen(when)}
 }
 
 func ports(ls []learnt) []string {
@@ -28,43 +29,42 @@ func TestPickAccess(t *testing.T) {
 		want    []string
 	}{
 		{
-			name: "aggregate dropped",
-			ls:   []learnt{lt("sw2", "ae0", "", now), lt("sw3", "ge-0/0/13", "", now)},
-			want: []string{"sw3 ge-0/0/13"},
-		},
-		{
-			name: "aggregate member dropped",
-			ls:   []learnt{lt("sw2", "xe-0/1/0", "ae1", now), lt("sw3", "ge-0/0/13", "", now)},
-			want: []string{"sw3 ge-0/0/13"},
+			// SRX behind an access LAG on sw2, reached through two
+			// backbone links; an old location on ge-0/0/13 is stale.
+			name:    "access AE kept",
+			ls:      []learnt{lt("sw2", "ge-0/0/13", old), lt("sw3", "xe-0/1/3", now), lt("sw1", "xe-0/1/3", now), lt("sw2", "ae0", now)},
+			uplinks: map[swPort]bool{{"sw3", "xe-0/1/3"}: true, {"sw1", "xe-0/1/3"}: true},
+			want:    []string{"sw2 ae0"},
 		},
 		{
 			name:    "known uplinks dropped",
-			ls:      []learnt{lt("sw3", "xe-0/1/3", "", now), lt("sw1", "mge-0/0/2", "", now), lt("sw2", "xe-0/1/3", "", now)},
+			ls:      []learnt{lt("sw3", "xe-0/1/3", now), lt("sw1", "mge-0/0/2", now), lt("sw2", "xe-0/1/3", now)},
 			uplinks: map[swPort]bool{{"sw3", "xe-0/1/3"}: true, {"sw2", "xe-0/1/3"}: true},
 			want:    []string{"sw1 mge-0/0/2"},
 		},
 		{
 			name:    "stale location dropped",
-			ls:      []learnt{lt("sw3", "xe-0/1/3", "", now), lt("sw1", "mge-0/0/3", "", old), lt("sw1", "mge-0/0/2", "", now)},
+			ls:      []learnt{lt("sw3", "xe-0/1/3", now), lt("sw1", "mge-0/0/3", old), lt("sw1", "mge-0/0/2", now)},
 			uplinks: map[swPort]bool{{"sw3", "xe-0/1/3"}: true},
 			want:    []string{"sw1 mge-0/0/2"},
 		},
 		{
 			name: "least loaded port without port stats",
-			ls:   []learnt{lt("sw3", "xe-0/1/3", "", now), lt("sw1", "ge-0/0/17", "", now), lt("sw2", "xe-0/1/3", "", now)},
+			ls:   []learnt{lt("sw3", "xe-0/1/3", now), lt("sw1", "ge-0/0/17", now), lt("sw2", "xe-0/1/3", now)},
 			load: map[swPort]int{{"sw3", "xe-0/1/3"}: 50, {"sw1", "ge-0/0/17"}: 1, {"sw2", "xe-0/1/3"}: 48},
 			want: []string{"sw1 ge-0/0/17"},
 		},
 		{
-			name: "never drops everything",
-			ls:   []learnt{lt("sw2", "ae0", "", now)},
-			want: []string{"sw2 ae0"},
+			name:    "never drops everything",
+			ls:      []learnt{lt("sw2", "xe-0/1/3", now), lt("sw3", "xe-0/1/2", now)},
+			uplinks: map[swPort]bool{{"sw2", "xe-0/1/3"}: true, {"sw3", "xe-0/1/2"}: true},
+			want:    []string{"sw2 xe-0/1/3", "sw3 xe-0/1/2"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ports(pickAccess(tt.ls, tt.uplinks, tt.load))
-			if len(got) != len(tt.want) || (len(got) > 0 && got[0] != tt.want[0]) {
+			if strings.Join(got, ";") != strings.Join(tt.want, ";") {
 				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})

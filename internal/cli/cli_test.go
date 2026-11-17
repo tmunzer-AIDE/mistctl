@@ -117,7 +117,7 @@ func (f *fakeMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/api/v1/orgs/"+orgID+"/stats/ports/search":
 		switch q.Get("mac") {
 		case "5c5b35000009":
-			fmt.Fprint(w, `{"results":[{"mac":"5c5b35000009","port_id":"xe-0/1/3","uplink":true,"mac_count":40},{"mac":"5c5b35000009","port_id":"ge-0/0/1","uplink":false}],"total":2}`)
+			fmt.Fprint(w, `{"results":[{"mac":"5c5b35000009","port_id":"xe-0/1/3","uplink":true,"neighbor_mac":"5c5b35000002","mac_count":40},{"mac":"5c5b35000009","port_id":"ge-0/0/1","uplink":false}],"total":2}`)
 		default:
 			fmt.Fprint(w, `{"results":[],"total":0}`)
 		}

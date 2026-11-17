@@ -34,8 +34,7 @@ type swPort struct{ mac, port string }
 // learnt is one entry of "device_mac_port".
 type learnt struct {
 	swPort
-	parent string
-	when   time.Time
+	when time.Time
 }
 
 func learntOf(m map[string]any) []learnt {
@@ -49,7 +48,6 @@ func learntOf(m map[string]any) []learnt {
 		}
 		l := learnt{
 			swPort: swPort{cache.NormalizeMAC(output.Text(e["device_mac"])), output.Text(e["port_id"])},
-			parent: output.Text(e["port_parent"]),
 			when:   parseWhen(output.Text(e["when"])),
 		}
 		if l.mac == "" || l.port == "" {
@@ -91,19 +89,13 @@ func narrow(ls []learnt, keep func(learnt) bool) []learnt {
 	return out
 }
 
-// isAggregate reports whether a port is an AE bundle or one of its members.
-// Clients sit on edge ports; AEs are inter-switch links.
-func isAggregate(port, parent string) bool {
-	return parent != "" || strings.HasPrefix(port, "ae")
-}
-
-// pickAccess reduces a client's learnt locations to its access port(s).
+// pickAccess reduces a client's learnt locations to its access port(s):
+// drop known uplinks, then stale locations, then keep the least loaded port.
 // uplinks may be nil; load counts how many clients were learnt on each port.
 func pickAccess(ls []learnt, uplinks map[swPort]bool, load map[swPort]int) []learnt {
 	if len(ls) <= 1 {
 		return ls
 	}
-	ls = narrow(ls, func(l learnt) bool { return !isAggregate(l.port, l.parent) })
 	ls = narrow(ls, func(l learnt) bool { return !uplinks[l.swPort] })
 	var newest time.Time
 	for _, l := range ls {
@@ -141,8 +133,8 @@ func addAccessPorts(ctx context.Context, a *app, items []json.RawMessage) []json
 		for _, l := range ls {
 			load[l.swPort]++
 		}
-		if edge := narrow(ls, func(l learnt) bool { return !isAggregate(l.port, l.parent) }); len(edge) > 1 {
-			for _, l := range edge {
+		if len(ls) > 1 {
+			for _, l := range ls {
 				ambiguous[l.mac] = true
 			}
 		}
@@ -174,9 +166,10 @@ func addAccessPorts(ctx context.Context, a *app, items []json.RawMessage) []json
 }
 
 // uplinkPorts returns the inter-switch ports of the given switches, from
-// their port stats: ports flagged as uplink, AE bundles and members, and
-// ports whose LLDP neighbor is a switch or gateway of the org. Errors are
-// ignored: the caller falls back to heuristics.
+// their port stats: ports whose LLDP neighbor is a switch of the org, and AE
+// bundles with such a member. An AE to a server or firewall stays an access
+// port. Gateway-facing ports are kept too: the only MACs learnt there are
+// the gateway's own. Errors are ignored: the caller falls back to heuristics.
 func uplinkPorts(ctx context.Context, a *app, switches map[string]bool) map[swPort]bool {
 	cl, err := a.client()
 	if err != nil {
@@ -189,7 +182,7 @@ func uplinkPorts(ctx context.Context, a *app, switches map[string]bool) map[swPo
 	infra := map[string]bool{}
 	if entries, err := a.index(ctx, kindDevices, true); err == nil {
 		for _, e := range entries {
-			if e.MAC != "" && e.Type != "ap" {
+			if e.MAC != "" && e.Type == "switch" {
 				infra[e.MAC] = true
 			}
 		}
@@ -212,11 +205,13 @@ func uplinkPorts(ctx context.Context, a *app, switches map[string]bool) map[swPo
 		}
 		for _, p := range ports {
 			m := output.Decode(p)
-			port := output.Text(m["port_id"])
 			neighbor := cache.NormalizeMAC(output.Text(m["neighbor_mac"]))
-			uplink, _ := m["uplink"].(bool)
-			if uplink || isAggregate(port, output.Text(m["port_parent"])) || (neighbor != "" && infra[neighbor]) {
-				out[swPort{mac, port}] = true
+			if neighbor == "" || !infra[neighbor] {
+				continue
+			}
+			out[swPort{mac, output.Text(m["port_id"])}] = true
+			if parent := output.Text(m["port_parent"]); parent != "" {
+				out[swPort{mac, parent}] = true
 			}
 		}
 	}
