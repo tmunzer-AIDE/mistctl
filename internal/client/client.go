@@ -1,0 +1,244 @@
+// Package client wraps mistapi-go for mistctl: it builds an authenticated,
+// GET-only SDK client and returns raw JSON so output matches the API exactly.
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/tmunzer/mistapi-go/mistapi"
+	"github.com/tmunzer/mistapi-go/mistapi/models"
+
+	"github.com/tmunzer-AIDE/mistctl/internal/cloud"
+)
+
+// BaseTransport is the underlying HTTP transport. Tests replace it to point
+// the client at a fake API.
+var BaseTransport http.RoundTripper = http.DefaultTransport
+
+// Client is a read-only Mist API client.
+type Client struct {
+	SDK   mistapi.ClientInterface
+	Cloud cloud.Cloud
+	Debug bool
+	// Calls counts HTTP requests sent during this invocation.
+	Calls int
+}
+
+// New builds a client for the given cloud and token.
+func New(c cloud.Cloud, token string, debug bool) (*Client, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, errors.New("no API token configured (use `mistctl config set-context --token` or $MIST_APITOKEN)")
+	}
+	token = strings.TrimPrefix(token, "Token ")
+	cl := &Client{Cloud: c, Debug: debug}
+	tr := &guardTransport{base: BaseTransport, debug: debug, counter: &cl.Calls}
+	cfg := mistapi.CreateConfigurationFromEnvironment(
+		mistapi.WithEnvironment(c.Env),
+		mistapi.WithApiTokenCredentials(mistapi.NewApiTokenCredentials("Token "+token)),
+		mistapi.WithHttpConfiguration(mistapi.NewHttpConfiguration(
+			mistapi.WithTimeout(60),
+			mistapi.WithTransport(tr),
+			mistapi.WithRetryConfiguration(mistapi.NewRetryConfiguration(
+				mistapi.WithMaxRetryAttempts(2),
+				mistapi.WithRetryInterval(1),
+				mistapi.WithBackoffFactor(2),
+				mistapi.WithHttpStatusCodesToRetry([]int64{408, 500, 502, 503, 504}),
+				mistapi.WithHttpMethodsToRetry([]string{"GET"}),
+			)),
+		)),
+	)
+	cl.SDK = mistapi.NewClient(cfg)
+	return cl, nil
+}
+
+// Raw is an API response body plus metadata.
+type Raw struct {
+	Status int
+	Header http.Header
+	Body   json.RawMessage
+}
+
+// APIError is a non-2xx answer from the Mist API.
+type APIError struct {
+	Status  int
+	Message string
+}
+
+func (e *APIError) Error() string {
+	switch e.Status {
+	case 401:
+		return "unauthorized (401): the API token is invalid or expired"
+	case 403:
+		return "permission denied (403): " + e.Message
+	case 404:
+		return "not found (404): " + e.Message
+	case 429:
+		return "rate limited (429): the hourly API budget is exhausted, see `mistctl usage`"
+	}
+	return fmt.Sprintf("API error %d: %s", e.Status, e.Message)
+}
+
+// Call runs one SDK call and returns the raw JSON body. Typed decoding errors
+// from the SDK are ignored when the API itself answered 2xx, so a schema drift
+// between the spec and the live API never hides data from the user.
+func Call[T any](ctx context.Context, c *Client, fn func(context.Context) (models.ApiResponse[T], error)) (Raw, error) {
+	cctx, capt := withCapture(ctx)
+	_, err := fn(cctx)
+	var nro ErrNotReadOnly
+	if errors.As(err, &nro) {
+		return Raw{}, nro
+	}
+	if capt.status == 0 {
+		if err == nil {
+			err = errors.New("no response from API")
+		}
+		return Raw{}, err
+	}
+	if capt.status < 200 || capt.status > 299 {
+		return Raw{}, &APIError{Status: capt.status, Message: errorMessage(capt.body)}
+	}
+	if err != nil && c.Debug {
+		fmt.Fprintf(os.Stderr, "warning: SDK decode error ignored, using raw response: %v\n", err)
+	}
+	body := capt.body
+	if len(body) == 0 {
+		body = []byte("null")
+	}
+	return Raw{Status: capt.status, Header: capt.header, Body: body}, nil
+}
+
+func errorMessage(b []byte) string {
+	var m map[string]any
+	if json.Unmarshal(b, &m) == nil {
+		for _, k := range []string{"detail", "message", "error", "reason"} {
+			if v, ok := m[k].(string); ok && v != "" {
+				return v
+			}
+		}
+	}
+	s := strings.TrimSpace(string(b))
+	if len(s) > 300 {
+		s = s[:300] + "..."
+	}
+	if s == "" {
+		s = "(empty body)"
+	}
+	return s
+}
+
+// PageSize is the page size used for list endpoints (Mist maximum).
+const PageSize = 1000
+
+// ListAll follows limit/page pagination until all items (or max items when
+// max > 0) are collected.
+func ListAll(ctx context.Context, max int, fetch func(ctx context.Context, limit, page int) (Raw, error)) ([]json.RawMessage, error) {
+	var out []json.RawMessage
+	limit := PageSize
+	if max > 0 && max < limit {
+		limit = max
+	}
+	for page := 1; ; page++ {
+		r, err := fetch(ctx, limit, page)
+		if err != nil {
+			return nil, err
+		}
+		var items []json.RawMessage
+		if err := json.Unmarshal(r.Body, &items); err != nil {
+			return nil, fmt.Errorf("unexpected list response: %w", err)
+		}
+		out = append(out, items...)
+		if max > 0 && len(out) >= max {
+			return out[:max], nil
+		}
+		if len(items) == 0 {
+			return out, nil
+		}
+		// Prefer the server's total; fall back to a short page as the end
+		// marker when the endpoint does not send X-Page-Total.
+		if total := atoi(r.Header.Get("X-Page-Total")); total > 0 {
+			if len(out) >= total {
+				return out, nil
+			}
+		} else if len(items) < limit {
+			return out, nil
+		}
+	}
+}
+
+// SearchAll follows the search_after cursor of Mist search endpoints.
+func SearchAll(ctx context.Context, max int, fetch func(ctx context.Context, limit int, searchAfter *string) (Raw, error)) ([]json.RawMessage, error) {
+	var out []json.RawMessage
+	limit := PageSize
+	if max > 0 && max < limit {
+		limit = max
+	}
+	var after *string
+	for {
+		r, err := fetch(ctx, limit, after)
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Results []json.RawMessage `json:"results"`
+			Next    string            `json:"next"`
+		}
+		if err := json.Unmarshal(r.Body, &page); err != nil {
+			return nil, fmt.Errorf("unexpected search response: %w", err)
+		}
+		out = append(out, page.Results...)
+		if max > 0 && len(out) >= max {
+			return out[:max], nil
+		}
+		next := searchAfterFromNext(page.Next)
+		if next == "" || len(page.Results) == 0 {
+			return out, nil
+		}
+		after = &next
+	}
+}
+
+func searchAfterFromNext(next string) string {
+	if next == "" {
+		return ""
+	}
+	u, err := url.Parse(next)
+	if err != nil {
+		return ""
+	}
+	return u.Query().Get("search_after")
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+// ParseUUID parses s as a UUID.
+func ParseUUID(s string) (uuid.UUID, bool) {
+	u, err := uuid.Parse(s)
+	return u, err == nil
+}
+
+// Ptr returns a pointer to v, or nil for the zero value.
+func Ptr[T comparable](v T) *T {
+	var zero T
+	if v == zero {
+		return nil
+	}
+	return &v
+}
