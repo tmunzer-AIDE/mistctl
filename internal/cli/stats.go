@@ -492,6 +492,32 @@ func searchPorts(ctx context.Context, a *app, q portQuery, max int) ([]json.RawM
 	})
 }
 
+// splitDevicePort splits DEVICE:PORT. Both halves can contain colons: a
+// device given as a MAC (aa:bb:cc:dd:ee:ff:ge-0/0/1) and a breakout port
+// (sw-core:et-0/0/48:0), whose ID ends with ":<channel>". The split is at
+// the last colon that is not the one before a numeric channel. Without a
+// device part ("ge-0/0/1", "et-0/0/48:0") device is empty.
+func splitDevicePort(name string) (device, port string) {
+	i := strings.LastIndex(name, ":")
+	if i >= 0 && i < len(name)-1 && isDigits(name[i+1:]) {
+		// A breakout channel: the port starts after the previous colon.
+		i = strings.LastIndex(name[:i], ":")
+	}
+	if i <= 0 {
+		return "", name
+	}
+	return name[:i], name[i+1:]
+}
+
+func isDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
 // describePort shows every stat of one port. NAME is DEVICE:PORT (DEVICE
 // being a name, ID or MAC), or just PORT with --device, or PORT alone when
 // only one device in scope has it.
@@ -500,8 +526,8 @@ func describePort(ctx context.Context, a *app, name string) (*described, error) 
 	if a.describeOpts != nil {
 		device = a.describeOpts.device
 	}
-	if i := strings.LastIndex(name, ":"); i > 0 && device == "" {
-		device, port = name[:i], name[i+1:]
+	if device == "" {
+		device, port = splitDevicePort(name)
 	}
 	if port == "" {
 		return nil, fmt.Errorf("missing port in %q (use DEVICE:PORT, e.g. sw-core:ge-0/0/1)", name)

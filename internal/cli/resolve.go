@@ -282,7 +282,86 @@ func (a *app) fetchOrgIndex(ctx context.Context) ([]cache.Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return orgEntriesFromSelf(raw), nil
+	entries := orgEntriesFromSelf(raw)
+	// An MSP privilege carries no org_id: its orgs come from the MSP.
+	seen := map[string]bool{}
+	for _, e := range entries {
+		seen[strings.ToLower(e.ID)] = true
+	}
+	for _, m := range mspPrivileges(raw) {
+		orgs, err := a.listMSPOrgs(ctx, m.id)
+		if err != nil {
+			// Best effort: the orgs granted directly still work.
+			fmt.Fprintf(a.err, "warning: could not list the orgs of MSP %s: %v\n", output.Safe(m.label()), err)
+			continue
+		}
+		for _, o := range orgs {
+			if k := strings.ToLower(o.ID); o.ID != "" && !seen[k] {
+				seen[k] = true
+				o.Type = m.role
+				entries = append(entries, o)
+			}
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name) })
+	return entries, nil
+}
+
+type mspPrivilege struct {
+	id         uuid.UUID
+	name, role string
+}
+
+func (m mspPrivilege) label() string {
+	if m.name != "" {
+		return m.name
+	}
+	return m.id.String()
+}
+
+// mspPrivileges extracts the MSPs the token has a privilege on from /self.
+func mspPrivileges(raw json.RawMessage) []mspPrivilege {
+	var self struct {
+		Privileges []struct {
+			Scope string `json:"scope"`
+			MspID string `json:"msp_id"`
+			Name  string `json:"name"`
+			Role  string `json:"role"`
+		} `json:"privileges"`
+	}
+	_ = json.Unmarshal(raw, &self)
+	seen := map[uuid.UUID]bool{}
+	var out []mspPrivilege
+	for _, p := range self.Privileges {
+		if p.Scope != "msp" {
+			continue
+		}
+		id, ok := client.ParseUUID(p.MspID)
+		if !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, mspPrivilege{id: id, name: p.Name, role: p.Role})
+	}
+	return out
+}
+
+func (a *app) listMSPOrgs(ctx context.Context, msp uuid.UUID) ([]cache.Entry, error) {
+	cl, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.Org], error) {
+		return cl.SDK.MSPsOrgs().ListMspOrgs(ctx, msp)
+	})
+	if err != nil {
+		return nil, err
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw.Body, &items); err != nil {
+		return nil, fmt.Errorf("unexpected response listing the MSP orgs: %w", err)
+	}
+	return toEntries(items), nil
 }
 
 // orgEntriesFromSelf extracts the orgs visible to the token from /self.
@@ -371,12 +450,20 @@ func (a *app) siteID(ctx context.Context) (id uuid.UUID, ok bool, err error) {
 	}
 	if t.siteInherited && t.orgOverridden && !a.sameOrg(ctx, t.siteOrg, org) {
 		// The context's default site belongs to another org: run at org
-		// scope rather than query a site of the previous org.
-		if a.debug {
-			fmt.Fprintf(a.err, "note: ignoring the context's default site %q, which belongs to another org\n", t.Site)
+		// scope rather than query a site of the previous org. When the
+		// context names no org, the site is kept if the selected org has it.
+		keep := false
+		if t.siteOrg == "" {
+			_, lerr := a.lookup(ctx, kindSites, t.Site)
+			keep = lerr == nil
 		}
-		t.Site, t.siteInherited = "", false
-		return uuid.Nil, false, nil
+		if !keep {
+			// Always said (not only with -v): the output silently widens
+			// from one site to the whole org otherwise.
+			fmt.Fprintf(a.err, "note: ignoring the context's default site %q, which is not in the selected org; running at org scope\n", output.Safe(t.Site))
+			t.Site, t.siteInherited = "", false
+			return uuid.Nil, false, nil
+		}
 	}
 	// Names and IDs are both checked against the org's site index, so a site
 	// of another org is rejected instead of being queried directly.

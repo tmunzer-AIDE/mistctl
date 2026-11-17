@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -36,10 +38,21 @@ type Options struct {
 	// ReadyTimeout is how long to hold keystrokes back while waiting for the
 	// first output of the device (default 10s).
 	ReadyTimeout time.Duration
+	// PingInterval is how often a websocket ping checks that the connection
+	// is still alive (default 30s; negative disables). A session is only
+	// ended for a missed pong once the server has answered one, so a server
+	// that never answers pings is not cut off.
+	PingInterval time.Duration
+	// PingTimeout is how long to wait for a pong (default 15s).
+	PingTimeout time.Duration
 	// Escape enables the ssh-style "~." (at the start of a line) sequence
 	// to end the session locally.
 	Escape bool
 }
+
+// ErrLost is returned when the server stops answering keepalive pings, for
+// example after the computer slept or the network changed.
+var ErrLost = errors.New("connection lost: the server stopped responding")
 
 // ErrEscape is returned when the user ended the session with "~.".
 var ErrEscape = errors.New("session closed with ~.")
@@ -54,6 +67,12 @@ func Run(ctx context.Context, o Options) error {
 	if o.ReadyTimeout <= 0 {
 		o.ReadyTimeout = 10 * time.Second
 	}
+	if o.PingInterval == 0 {
+		o.PingInterval = 30 * time.Second
+	}
+	if o.PingTimeout <= 0 {
+		o.PingTimeout = 15 * time.Second
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -62,7 +81,7 @@ func Run(ctx context.Context, o Options) error {
 		if resp != nil {
 			return fmt.Errorf("websocket handshake failed: %s", resp.Status)
 		}
-		return fmt.Errorf("websocket connection failed: %w", err)
+		return fmt.Errorf("websocket connection failed: %w", redactDialErr(err))
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(-1)
@@ -77,7 +96,7 @@ func Run(ctx context.Context, o Options) error {
 		return fmt.Errorf("websocket send failed: %w", err)
 	}
 
-	done := make(chan error, 3)
+	done := make(chan error, 4)
 	ready := make(chan struct{})
 
 	// device -> terminal
@@ -161,6 +180,34 @@ func Run(ctx context.Context, o Options) error {
 		}()
 	}
 
+	// keepalive: without it a dead connection hangs until the user notices.
+	if o.PingInterval > 0 {
+		go func() {
+			t := time.NewTicker(o.PingInterval)
+			defer t.Stop()
+			answered := false
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
+				pctx, pcancel := context.WithTimeout(ctx, o.PingTimeout)
+				perr := conn.Ping(pctx)
+				pcancel()
+				switch {
+				case perr == nil:
+					answered = true
+				case ctx.Err() != nil:
+					return
+				case answered:
+					done <- ErrLost
+					return
+				}
+			}
+		}()
+	}
+
 	select {
 	case err = <-done:
 	case <-ctx.Done():
@@ -168,6 +215,23 @@ func Run(ctx context.Context, o Options) error {
 	}
 	conn.Close(websocket.StatusNormalClosure, "")
 	return err
+}
+
+// redactDialErr drops the query string (it can carry a session secret) from
+// the URL an HTTP client error quotes, so a failed dial never prints it.
+func redactDialErr(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	shown := ue.URL
+	if u, perr := url.Parse(ue.URL); perr == nil {
+		u.RawQuery, u.Fragment, u.User = "", "", nil
+		shown = u.String()
+	} else if i := strings.IndexAny(shown, "?#"); i >= 0 {
+		shown = shown[:i]
+	}
+	return fmt.Errorf("%s %q: %w", ue.Op, shown, ue.Err)
 }
 
 func sendResize(ctx context.Context, conn *websocket.Conn, cols, rows int) error {

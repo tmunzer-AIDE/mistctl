@@ -260,6 +260,12 @@ func checkEventFlags(o *listOpts) error {
 	return nil
 }
 
+// orgEventDeviceTypes is sent with the org-scope device event search, whose
+// device_type filter defaults to "ap" on the server: without it switch and
+// gateway events are silently left out. The site-scope search has no such
+// default.
+var orgEventDeviceTypes = "ap,switch,gateway"
+
 func listEvents(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
 	if !contains(eventSources, o.source) {
 		return nil, fmt.Errorf("invalid --source %q (valid: %s)", o.source, strings.Join(eventSources, ", "))
@@ -305,7 +311,7 @@ func listEvents(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, er
 	case o.source == "device":
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseDeviceEventsSearch], error) {
-				return cl.SDK.OrgsDevices().SearchOrgDeviceEvents(ctx, org, mac, nil, nil, text, typ, nil, nil, &limit, w.start, w.end, nil, srt, after)
+				return cl.SDK.OrgsDevices().SearchOrgDeviceEvents(ctx, org, mac, nil, &orgEventDeviceTypes, text, typ, nil, nil, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
 	case o.source == "client":
