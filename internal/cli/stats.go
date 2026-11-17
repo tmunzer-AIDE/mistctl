@@ -166,7 +166,7 @@ func describeMxedge(ctx context.Context, a *app, name string) (*described, error
 		[2]string{"Tunnels", output.Text(s["num_tunnels"])},
 		[2]string{"Services", output.Text(c["services"])},
 	)
-	return &described{Header: header, Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr))}, nil
+	return (&described{Header: header, Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr))}).noteUnavailable(a, "stats", serr), nil
 }
 
 // ---- routing peers --------------------------------------------------------

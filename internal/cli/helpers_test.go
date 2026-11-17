@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -74,4 +75,23 @@ func setupRoutes(t *testing.T, routes map[string]http.HandlerFunc) *routeMist {
 
 func body(s string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(s)) }
+}
+
+// windowSeconds returns end-start of a request's fixed time window.
+func windowSeconds(q url.Values) int64 {
+	s, err1 := strconv.ParseInt(q.Get("start"), 10, 64)
+	e, err2 := strconv.ParseInt(q.Get("end"), 10, 64)
+	if err1 != nil || err2 != nil || q.Has("duration") {
+		return -1
+	}
+	return e - s
+}
+
+// windowOf is windowSeconds for a recorded "path?query" call.
+func windowOf(call string) int64 {
+	u, err := url.Parse(call)
+	if err != nil {
+		return -1
+	}
+	return windowSeconds(u.Query())
 }

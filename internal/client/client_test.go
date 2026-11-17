@@ -124,3 +124,83 @@ func TestEmptyToken(t *testing.T) {
 		t.Fatal("expected error for empty token")
 	}
 }
+
+// The server may cap a page below the requested limit: a trustworthy total
+// must win over the short-page heuristic.
+func TestPagedAllTrustsTotalOverShortPage(t *testing.T) {
+	pages := map[int]string{1: `{"results":[1,2],"limit":2,"total":3}`, 2: `{"results":[3],"limit":2,"total":3}`}
+	calls := 0
+	items, err := PagedAll(context.Background(), 0, func(ctx context.Context, limit, page int) (Raw, error) {
+		calls++
+		return Raw{Body: []byte(pages[page])}, nil
+	})
+	if err != nil || len(items) != 3 || calls != 2 {
+		t.Fatalf("items=%d calls=%d err=%v", len(items), calls, err)
+	}
+	// Without total, the effective "limit" of the response is used.
+	pages = map[int]string{1: `{"results":[1,2],"limit":2}`, 2: `{"results":[3],"limit":2}`}
+	calls = 0
+	items, _ = PagedAll(context.Background(), 0, func(ctx context.Context, limit, page int) (Raw, error) {
+		calls++
+		return Raw{Body: []byte(pages[page])}, nil
+	})
+	if len(items) != 3 || calls != 2 {
+		t.Fatalf("effective limit: items=%d calls=%d", len(items), calls)
+	}
+	if _, err := PagedAll(context.Background(), 0, func(ctx context.Context, limit, page int) (Raw, error) {
+		return Raw{Body: []byte(`[1,2]`)}, nil
+	}); err == nil {
+		t.Error("malformed envelope should be an error")
+	}
+}
+
+func TestListAllUsesEffectivePageLimit(t *testing.T) {
+	calls := 0
+	items, err := ListAll(context.Background(), 0, func(ctx context.Context, limit, page int) (Raw, error) {
+		calls++
+		if page == 1 {
+			return Raw{Body: []byte(`[1,2]`), Header: http.Header{"X-Page-Limit": {"2"}}}, nil
+		}
+		return Raw{Body: []byte(`[3]`), Header: http.Header{"X-Page-Limit": {"2"}}}, nil
+	})
+	if err != nil || len(items) != 3 || calls != 2 {
+		t.Fatalf("items=%d calls=%d err=%v", len(items), calls, err)
+	}
+}
+
+func TestSearchAllRejectsRepeatedCursor(t *testing.T) {
+	calls := 0
+	_, err := SearchAll(context.Background(), 0, func(ctx context.Context, limit int, after *string) (Raw, error) {
+		calls++
+		if calls > 10 {
+			t.Fatal("cursor loop not detected")
+		}
+		return Raw{Body: []byte(`{"results":[1],"next":"/x?search_after=%5B1%5D"}`)}, nil
+	})
+	if err == nil || calls != 2 {
+		t.Fatalf("expected an error after 2 calls, got %v after %d", err, calls)
+	}
+	if _, err := SearchAll(context.Background(), 0, func(ctx context.Context, limit int, after *string) (Raw, error) {
+		return Raw{Body: []byte(`[]`)}, nil
+	}); err == nil {
+		t.Error("malformed envelope should be an error")
+	}
+}
+
+// The output limit applies to matches, so a match on a later page is found.
+func TestSearchFilteredLimitsMatches(t *testing.T) {
+	pages := []string{
+		`{"results":[{"type":"OTHER"}],"next":"/x?search_after=1"}`,
+		`{"results":[{"type":"TARGET"}],"next":"/x?search_after=2"}`,
+		`{"results":[{"type":"TARGET"}]}`,
+	}
+	calls := 0
+	keep := func(r json.RawMessage) bool { return string(r) == `{"type":"TARGET"}` }
+	items, err := SearchFiltered(context.Background(), 1, keep, func(ctx context.Context, limit int, after *string) (Raw, error) {
+		calls++
+		return Raw{Body: []byte(pages[calls-1])}, nil
+	})
+	if err != nil || len(items) != 1 || calls != 2 {
+		t.Fatalf("items=%v calls=%d err=%v", items, calls, err)
+	}
+}

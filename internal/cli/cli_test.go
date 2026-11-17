@@ -99,8 +99,8 @@ func (f *fakeMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(w, `{"results":[{"mac":"112233445566","last_hostname":"phone","last_ssid":"Guest","site_id":"%s"}],"total":2}`, siteLab)
 	case p == "/api/v1/orgs/"+orgID+"/wired_clients/search", p == "/api/v1/sites/"+siteHQ+"/wired_clients/search":
-		if q.Get("duration") != "1d" && q.Get("mac") == "" {
-			http.Error(w, `{"detail":"expected duration=1d"}`, 400)
+		if windowSeconds(q) != 86400 && q.Get("mac") == "" {
+			http.Error(w, `{"detail":"expected a 1d start/end window"}`, 400)
 			return
 		}
 		recs := map[string]string{

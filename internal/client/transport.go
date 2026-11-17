@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"time"
@@ -19,6 +20,22 @@ func (e ErrNotReadOnly) Error() string {
 }
 
 type captureKey struct{}
+
+type queryKey struct{}
+
+// WithQuery returns a context whose requests carry an extra query parameter,
+// for parameters an SDK method does not expose (e.g. page). A parameter the
+// SDK already set is left unchanged.
+func WithQuery(ctx context.Context, key, value string) context.Context {
+	q := url.Values{}
+	if prev, ok := ctx.Value(queryKey{}).(url.Values); ok {
+		for k, v := range prev {
+			q[k] = v
+		}
+	}
+	q.Set(key, value)
+	return context.WithValue(ctx, queryKey{}, q)
+}
 
 // capture records the raw response of the last request made with a context.
 type capture struct {
@@ -59,6 +76,16 @@ type guardTransport struct {
 func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if !allowed(req.Method, req.URL.Path) {
 		return nil, ErrNotReadOnly{req.Method, req.URL.Path}
+	}
+	if extra, ok := req.Context().Value(queryKey{}).(url.Values); ok && len(extra) > 0 {
+		req = req.Clone(req.Context())
+		q := req.URL.Query()
+		for k, v := range extra {
+			if !q.Has(k) {
+				q[k] = v
+			}
+		}
+		req.URL.RawQuery = q.Encode()
 	}
 	start := time.Now()
 	resp, err := t.base.RoundTrip(req)

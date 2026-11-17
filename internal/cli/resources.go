@@ -191,7 +191,7 @@ func orgsResource() *resource {
 			if serr == nil {
 				s = output.Decode(stats.Body)
 			}
-			return &described{
+			return (&described{
 				Header: [][2]string{
 					{"Name", output.Text(o["name"])},
 					{"ID", e.ID},
@@ -205,7 +205,7 @@ func orgsResource() *resource {
 					{"Created", ageOf(o["created_time"])},
 				},
 				Doc: combine("org", org.Body, "stats", bodyOrNil(stats, serr)),
-			}, nil
+			}).noteUnavailable(a, "stats", serr), nil
 		},
 	}
 }
@@ -280,7 +280,7 @@ func sitesResource() *resource {
 				}
 				return fmt.Sprintf("%s/%s connected", orDash(c), t)
 			}
-			return &described{
+			return (&described{
 				Header: [][2]string{
 					{"Name", output.Text(si["name"])},
 					{"ID", e.ID},
@@ -294,7 +294,7 @@ func sitesResource() *resource {
 					{"Created", ageOf(si["created_time"])},
 				},
 				Doc: combine("site", site.Body, "stats", bodyOrNil(stats, serr)),
-			}, nil
+			}).noteUnavailable(a, "stats", serr), nil
 		},
 	}
 }
@@ -446,7 +446,7 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 		}
 		return output.Text(c[k])
 	}
-	return &described{
+	return (&described{
 		Header: [][2]string{
 			{"Name", pick("name")},
 			{"ID", e.ID},
@@ -463,7 +463,7 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 			{"Clients", output.Text(s["num_clients"])},
 		},
 		Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr)),
-	}, nil
+	}).noteUnavailable(a, "stats", serr), nil
 }
 
 // ---- helpers --------------------------------------------------------------
@@ -517,6 +517,27 @@ func combine(k1 string, v1 json.RawMessage, k2 string, v2 json.RawMessage) json.
 		parts = append(parts, string(k)+":"+string(kv.v))
 	}
 	return json.RawMessage("{" + strings.Join(parts, ",") + "}")
+}
+
+// noteUnavailable records that a secondary request of describe failed: the
+// summary gets a "<What>: unavailable ..." line, the document a
+// "<what>_error" field and stderr a warning, so a 401/403/429 or a service
+// error is never mistaken for missing data. A 404 means "no data" and is not
+// reported.
+func (d *described) noteUnavailable(a *app, what string, err error) *described {
+	if err == nil || isNotFound(err) {
+		return d
+	}
+	fmt.Fprintf(a.err, "warning: %s unavailable: %v\n", what, err)
+	label := strings.ToUpper(what[:1]) + what[1:]
+	d.Header = append(d.Header, [2]string{label, "unavailable: " + err.Error()})
+	d.Doc = appendField(d.Doc, what+"_error", err.Error())
+	return d
+}
+
+func isNotFound(err error) bool {
+	var apiErr *client.APIError
+	return errors.As(err, &apiErr) && apiErr.Status == 404
 }
 
 func bodyOrNil(r client.Raw, err error) json.RawMessage {

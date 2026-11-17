@@ -140,22 +140,30 @@ func errorMessage(b []byte) string {
 // PageSize is the page size used for list endpoints (Mist maximum).
 const PageSize = 1000
 
-// ListAll follows limit/page pagination until all items (or max items when
-// max > 0) are collected.
+// maxPages bounds every pagination loop, as a last defence against an API
+// that never signals the end.
+const maxPages = 10000
+
+// ListAll follows limit/page pagination of endpoints that return a JSON
+// array, until all items (or max items when max > 0) are collected.
+//
+// The end is detected from X-Page-Total when the API sends it; otherwise a
+// page shorter than the server's effective page size (X-Page-Limit, or the
+// requested limit) ends the listing. An empty page always ends it.
 func ListAll(ctx context.Context, max int, fetch func(ctx context.Context, limit, page int) (Raw, error)) ([]json.RawMessage, error) {
 	var out []json.RawMessage
 	limit := PageSize
 	if max > 0 && max < limit {
 		limit = max
 	}
-	for page := 1; ; page++ {
+	for page := 1; page <= maxPages; page++ {
 		r, err := fetch(ctx, limit, page)
 		if err != nil {
 			return nil, err
 		}
 		var items []json.RawMessage
 		if err := json.Unmarshal(r.Body, &items); err != nil {
-			return nil, fmt.Errorf("unexpected list response: %w", err)
+			return nil, fmt.Errorf("unexpected list response (expected a JSON array): %w", err)
 		}
 		out = append(out, items...)
 		if max > 0 && len(out) >= max {
@@ -164,48 +172,118 @@ func ListAll(ctx context.Context, max int, fetch func(ctx context.Context, limit
 		if len(items) == 0 {
 			return out, nil
 		}
-		// Prefer the server's total; fall back to a short page as the end
-		// marker when the endpoint does not send X-Page-Total.
 		if total := atoi(r.Header.Get("X-Page-Total")); total > 0 {
 			if len(out) >= total {
 				return out, nil
 			}
-		} else if len(items) < limit {
+			continue
+		}
+		effective := limit
+		if l := atoi(r.Header.Get("X-Page-Limit")); l > 0 && l < effective {
+			effective = l
+		}
+		if len(items) < effective {
 			return out, nil
 		}
 	}
+	return nil, fmt.Errorf("pagination did not end after %d pages", maxPages)
 }
 
-// SearchAll follows the search_after cursor of Mist search endpoints.
-func SearchAll(ctx context.Context, max int, fetch func(ctx context.Context, limit int, searchAfter *string) (Raw, error)) ([]json.RawMessage, error) {
+// PagedAll follows limit/page pagination of endpoints that wrap their items
+// in {"results": [...], "limit": N, "total": N}. "total" is trusted over the
+// page length; without it, a page shorter than the effective limit (the
+// response's "limit", or the requested one) ends the listing.
+func PagedAll(ctx context.Context, max int, fetch func(ctx context.Context, limit, page int) (Raw, error)) ([]json.RawMessage, error) {
 	var out []json.RawMessage
 	limit := PageSize
 	if max > 0 && max < limit {
 		limit = max
 	}
+	for page := 1; page <= maxPages; page++ {
+		r, err := fetch(ctx, limit, page)
+		if err != nil {
+			return nil, err
+		}
+		var body struct {
+			Results *[]json.RawMessage `json:"results"`
+			Total   int                `json:"total"`
+			Limit   int                `json:"limit"`
+		}
+		if err := json.Unmarshal(r.Body, &body); err != nil || body.Results == nil {
+			return nil, fmt.Errorf("unexpected response: expected an object with a \"results\" list")
+		}
+		items := *body.Results
+		out = append(out, items...)
+		if max > 0 && len(out) >= max {
+			return out[:max], nil
+		}
+		if len(items) == 0 {
+			return out, nil
+		}
+		if body.Total > 0 {
+			if len(out) >= body.Total {
+				return out, nil
+			}
+			continue
+		}
+		effective := limit
+		if body.Limit > 0 && body.Limit < effective {
+			effective = body.Limit
+		}
+		if len(items) < effective {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("pagination did not end after %d pages", maxPages)
+}
+
+// SearchAll follows the search_after cursor of Mist search endpoints.
+func SearchAll(ctx context.Context, max int, fetch func(ctx context.Context, limit int, searchAfter *string) (Raw, error)) ([]json.RawMessage, error) {
+	return SearchFiltered(ctx, max, nil, fetch)
+}
+
+// SearchFiltered is SearchAll with a local predicate: max applies to the
+// items keep accepts, and pages are fetched until max matches are found or
+// the results end. A repeated cursor or a malformed envelope is an error.
+func SearchFiltered(ctx context.Context, max int, keep func(json.RawMessage) bool, fetch func(ctx context.Context, limit int, searchAfter *string) (Raw, error)) ([]json.RawMessage, error) {
+	var out []json.RawMessage
+	limit := PageSize
+	if keep == nil && max > 0 && max < limit {
+		limit = max
+	}
 	var after *string
-	for {
+	seen := map[string]bool{}
+	for page := 1; page <= maxPages; page++ {
 		r, err := fetch(ctx, limit, after)
 		if err != nil {
 			return nil, err
 		}
-		var page struct {
-			Results []json.RawMessage `json:"results"`
-			Next    string            `json:"next"`
+		var body struct {
+			Results *[]json.RawMessage `json:"results"`
+			Next    string             `json:"next"`
 		}
-		if err := json.Unmarshal(r.Body, &page); err != nil {
-			return nil, fmt.Errorf("unexpected search response: %w", err)
+		if err := json.Unmarshal(r.Body, &body); err != nil || body.Results == nil {
+			return nil, fmt.Errorf("unexpected search response: expected an object with a \"results\" list")
 		}
-		out = append(out, page.Results...)
+		for _, it := range *body.Results {
+			if keep == nil || keep(it) {
+				out = append(out, it)
+			}
+		}
 		if max > 0 && len(out) >= max {
 			return out[:max], nil
 		}
-		next := searchAfterFromNext(page.Next)
-		if next == "" || len(page.Results) == 0 {
+		next := searchAfterFromNext(body.Next)
+		if next == "" || len(*body.Results) == 0 {
 			return out, nil
 		}
+		if seen[next] {
+			return nil, fmt.Errorf("the API returned the same search cursor twice (%s); stopping to avoid a loop", next)
+		}
+		seen[next] = true
 		after = &next
 	}
+	return nil, fmt.Errorf("pagination did not end after %d pages", maxPages)
 }
 
 func searchAfterFromNext(next string) string {

@@ -69,15 +69,16 @@ the API for APs, switches and gateways.`,
 	},
 	"clients": {
 		group: "inventory", title: "client",
-		about: `With a site, wireless clients are the ones connected right now. Without a
-site (or with -A), and for wired clients, the list is a search over
---duration. A MAC seen both wireless and wired is one row.`,
+		about: `With a site, wireless clients are the ones connected right now (current
+state). Without a site (or with -A), and for wired clients, the list is a
+historical search over --duration. A MAC seen both wireless and wired is one
+row.`,
 		examples: []string{
 			"get clients --site HQ",
 			"get clients --site HQ --type wired -o wide",
 			"get clients -A --duration 7d",
 		},
-		describe:         "Prints everything known about one client: its wireless and wired views, or one of them with --type. NAME is the MAC address of the client, which must have been seen in the last 7 days.",
+		describe:         "Prints everything known about one client: its wireless and wired views, or one of them with --type. NAME is the MAC address of the client. The client is found with an org-wide client search over --duration (default 7d); for a wireless client, its current stats are then read on the site it was last seen on. When those stats cannot be read (permissions, rate limit, service error), State says so instead of \"not connected\".",
 		describeOrgWide:  true,
 		describeExamples: []string{"describe client aa:bb:cc:dd:ee:ff", "describe client aa:bb:cc:dd:ee:ff --type wired"},
 	},
@@ -183,8 +184,10 @@ WLANs plus the ones inherited from templates.`,
 		short: "Device, client or system events during a time window",
 		about: `Searches events during --duration (default 1d), newest first. --source picks
 the kind of events: device (default), client (wireless client events) or
-system (configuration and audit-style events). Only the newest --limit events
-are fetched (default 1000); pass --limit 0 for all of them.`,
+system (configuration and audit-style events). --limit caps the number of
+events shown (default 1000, the newest ones); pass --limit 0 for all of them.
+Org-wide system events have no API type filter: --type is applied locally and
+mistctl reads further pages until --limit matching events are found.`,
 		examples: []string{
 			"get events --site HQ",
 			"get events --device sw-core --type SW_PORT_DOWN --duration 7d",
