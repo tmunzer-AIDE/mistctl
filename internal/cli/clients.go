@@ -39,8 +39,10 @@ func clientsResource() *resource {
 			output.Col("MAC", "mac"),
 			output.Col("TYPE", "client_type"),
 			output.Col("IP", "last_ip", "ip"),
-			output.Col("DEVICE", "device_name", "ap_mac", "last_ap", "ap", "device_mac"),
-			output.Col("SSID/PORT", "last_ssid", "ssid", "port_id"),
+			// Wired: access_* is the edge switch/port (uplinks dropped, see
+			// addAccessPorts); the full lists stay in json/yaml.
+			output.Col("DEVICE", "access_device", "device_name", "ap_mac", "last_ap", "ap", "device_mac"),
+			output.Col("SSID/PORT", "last_ssid", "ssid", "access_port_id", "port_id"),
 			output.Col("VLAN", "vlan_id", "last_vlan", "vlan"),
 			output.Col("BAND", "band").AsWide(),
 			output.Col("RSSI", "rssi").AsWide(),
@@ -60,7 +62,11 @@ func clientsResource() *resource {
 		},
 		EnrichAlways: true,
 		Enrich: func(ctx context.Context, a *app, items []json.RawMessage) []json.RawMessage {
-			return addDeviceNames(ctx, a, addSiteNames(ctx, a, items))
+			items = addDeviceNames(ctx, a, addSiteNames(ctx, a, items))
+			if a.output == "table" || a.output == "wide" {
+				items = addAccessPorts(ctx, a, items)
+			}
+			return items
 		},
 		Describe: describeClient,
 	}
@@ -244,7 +250,7 @@ func mergeDescribed(wl, wd *described) *described {
 	}
 	for _, kv := range wd.Header {
 		switch kv[0] {
-		case "Device", "Device MAC", "Port", "Auth":
+		case "Device", "Device MAC", "Port", "Learnt on", "Auth":
 			header = append(header, [2]string{"Wired " + strings.ToLower(kv[0]), kv[1]})
 		case "VLAN":
 			header = append(header, [2]string{"Wired VLAN", kv[1]})
@@ -367,6 +373,31 @@ func describeWired(ctx context.Context, a *app, mac string) (*described, error) 
 	}
 	items := addDeviceNames(ctx, a, []json.RawMessage{res.Results[0]})
 	m := output.Decode(items[0])
+	device, deviceMAC, port := output.Text(m["device_name"]), output.Text(m["device_mac"]), output.Text(m["port_id"])
+	learntOn := ""
+	if ls := learntOf(m); len(ls) > 0 {
+		names := deviceNamesByMAC(ctx, a)
+		var info portInfo
+		if len(ls) > 1 {
+			switches := map[string]bool{}
+			for _, l := range ls {
+				switches[l.mac] = true
+			}
+			info = uplinkPorts(ctx, a, switches)
+		}
+		var devs, macs, ports []string
+		for _, l := range pickAccess(info.fold(ls), info.uplinks, nil) {
+			d := names[l.mac]
+			if d == "" {
+				d = l.mac
+			}
+			devs, macs, ports = append(devs, d), append(macs, l.mac), append(ports, l.port)
+		}
+		device, deviceMAC, port = strings.Join(devs, ","), strings.Join(macs, ","), strings.Join(ports, ",")
+		if len(ls) > 1 {
+			learntOn = learntLabels(ls, names)
+		}
+	}
 	return &described{
 		Header: [][2]string{
 			{"Hostname", output.Text(m["dhcp_hostname"])},
@@ -374,9 +405,10 @@ func describeWired(ctx context.Context, a *app, mac string) (*described, error) 
 			{"Type", "wired"},
 			{"Site", siteLabel(a.siteNames(ctx), output.Text(m["site_id"]))},
 			{"IP", output.Text(m["ip"])},
-			{"Device", output.Text(m["device_name"])},
-			{"Device MAC", output.Text(m["device_mac"])},
-			{"Port", output.Text(m["port_id"])},
+			{"Device", device},
+			{"Device MAC", deviceMAC},
+			{"Port", port},
+			{"Learnt on", learntOn},
 			{"VLAN", output.Text(m["vlan"])},
 			{"Auth", strings.TrimSpace(output.Text(m["auth_state"]) + " " + output.Text(m["auth_method"]))},
 			{"Last seen", ageOf(m["timestamp"])},

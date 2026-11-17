@@ -104,7 +104,7 @@ func (f *fakeMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		recs := map[string]string{
-			"001122334455": fmt.Sprintf(`{"mac":"001122334455","dhcp_hostname":"printer","ip":["10.0.2.7"],"device_mac":["5c5b35000002"],"port_id":["ge-0/0/5"],"vlan":[20],"site_id":"%s","auth_state":"authenticated","timestamp":1794887387.5}`, siteHQ),
+			"001122334455": fmt.Sprintf(`{"mac":"001122334455","dhcp_hostname":"printer","ip":["10.0.2.7"],"device_mac":["5c5b35000009","5c5b35000002"],"port_id":["xe-0/1/3","ge-0/0/5"],"device_mac_port":[{"device_mac":"5c5b35000009","port_id":"xe-0/1/3","port_parent":"","when":"2026-11-17T04:38:13.875+0000"},{"device_mac":"5c5b35000002","port_id":"ge-0/0/5","port_parent":"","when":"2026-11-17T04:38:02.177+0000"}],"vlan":[20],"site_id":"%s","auth_state":"authenticated","timestamp":1794887387.5}`, siteHQ),
 			"aabbccddeeff": fmt.Sprintf(`{"mac":"aabbccddeeff","ip":["10.0.1.5"],"device_mac":["5c5b35000002"],"port_id":["ge-0/0/1"],"vlan":[10],"site_id":"%s"}`, siteHQ),
 		}
 		var res []string
@@ -114,6 +114,13 @@ func (f *fakeMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		fmt.Fprintf(w, `{"results":[%s],"total":%d}`, strings.Join(res, ","), len(res))
+	case p == "/api/v1/orgs/"+orgID+"/stats/ports/search":
+		switch q.Get("mac") {
+		case "5c5b35000009":
+			fmt.Fprint(w, `{"results":[{"mac":"5c5b35000009","port_id":"xe-0/1/3","uplink":true,"neighbor_mac":"5c5b35000002","mac_count":40},{"mac":"5c5b35000009","port_id":"ge-0/0/1","uplink":false}],"total":2}`)
+		default:
+			fmt.Fprint(w, `{"results":[],"total":0}`)
+		}
 	default:
 		w.WriteHeader(404)
 		fmt.Fprintf(w, `{"detail":"no route %s"}`, p)
@@ -395,4 +402,17 @@ func TestClientsWiredAndWireless(t *testing.T) {
 		t.Error("expected invalid --type error")
 	}
 	assertContains(t, run(t, "__complete", "get", "clients", "--type", ""), "wireless", "wired")
+}
+
+func TestWiredClientShowsAccessPortOnly(t *testing.T) {
+	setup(t)
+	out := run(t, "get", "clients", "--type", "wired")
+	assertContains(t, out, "printer", "sw-core", "ge-0/0/5")
+	if strings.Contains(out, "xe-0/1/3") || strings.Contains(out, "5c5b35000009") {
+		t.Errorf("table still shows the uplink:\n%s", out)
+	}
+	// json/yaml keep every learnt location
+	assertContains(t, run(t, "get", "clients", "--type", "wired", "-o", "json"), "xe-0/1/3", "5c5b35000009")
+	d := run(t, "describe", "client", "00:11:22:33:44:55")
+	assertContains(t, d, "Port:", "ge-0/0/5", "Learnt on:", "5c5b35000009 xe-0/1/3")
 }
