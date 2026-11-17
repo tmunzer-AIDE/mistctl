@@ -1,99 +1,69 @@
 # Releasing mistctl
 
-Releases are built by GoReleaser from `.github/workflows/release.yml` when a
-`v*` tag is pushed. The GitHub release is created as a **draft** so it can be
-checked before publishing.
+Releases are built and published from the maintainer's Mac with GoReleaser,
+driven by `make`. The macOS binaries are signed with the Developer ID
+identity in the local keychain and notarized with a local `notarytool`
+profile, so no Apple certificate, key or password is stored on GitHub.
+GitHub access uses the `gh` CLI login; no personal access token is needed.
 
-Every signing and publishing step is optional and only runs when its secrets
-are set in the repository (Settings, Secrets and variables, Actions, New
-repository secret). A release without any secret still produces unsigned
-archives, Linux packages and checksums on the draft release.
+The GitHub release is created as a **draft** so it can be checked before
+publishing.
 
-## Quick path with `make`
-
-The Makefile wraps every step below with the GitHub CLI (`brew install gh`,
-then `gh auth login` as `tmunzer-AIDE`). Each target is safe to re-run: it
-skips what already exists, and nothing is tagged, published or opened
-upstream without a `y` at a prompt.
+## Commands
 
 ```sh
-make release-doctor        # what is set up, what is missing
-make release-repos         # create homebrew-tap + scoop-bucket (with README), fork winget-pkgs
-make release-tokens        # opens 2 pre-filled PAT forms, then asks you to paste each token
-make release-secrets-macos   # asks for the .p12, the .p8 and the issuer ID (key ID read from the .p8 name)
-make release-secrets-windows # optional, asks for the .pfx
+make release-doctor             # tools, signing identity, notary profile, repos
+make release-repos              # one time: create homebrew-tap + scoop-bucket, fork winget-pkgs
 
-make release VERSION=v0.1.0     # checks main is clean and in sync, tags, pushes
-make publish VERSION=v0.1.0     # after reviewing the draft release
-make winget-pr VERSION=v0.1.0   # opens the PR to microsoft/winget-pkgs
+make release VERSION=v0.1.0     # test, tag, push the tag, build, sign, notarize, draft release
+make publish VERSION=v0.1.0     # after reviewing the draft
+make winget-pr VERSION=v0.1.0   # open the PR to microsoft/winget-pkgs
 ```
 
-Passwords are asked at a hidden prompt (pass `P12_PASSWORD=` or
-`PFX_PASSWORD=` only if you accept them landing in your shell history). Files
-are base64-encoded and piped straight to `gh secret set`; nothing is written
-to disk. The PAT forms cannot pre-select repositories: pick "Only select
-repositories" and the repositories named in the terminal.
-
-The certificate, the App Store Connect API key and the PATs themselves still
-have to be created by hand, as described below.
+Every command is safe to re-run. `release-repos` skips what exists. If
+`make release` fails after the tag was pushed (a notarization error, for
+example), fix the cause and run it again: it reuses the tag when it points at
+the current commit. Nothing is tagged, published or opened upstream without a
+`y` at a prompt.
 
 ## One-time setup
 
-### 1. Package repositories
+### 1. Tools
 
-Create two **public** repositories under `tmunzer-AIDE`, each initialized with
-a README so they have a `main` branch (GoReleaser cannot push to an empty
-repository):
+```sh
+brew install gh goreleaser syft
+gh auth login            # as tmunzer-AIDE, with the repo scope (the default)
+```
 
-| Repository | Purpose | GoReleaser writes |
-| --- | --- | --- |
-| `tmunzer-AIDE/homebrew-tap` | Homebrew cask | `Casks/mistctl.rb` |
-| `tmunzer-AIDE/scoop-bucket` | Scoop manifest | `mistctl.json` |
+Xcode command line tools provide `codesign` and `notarytool`
+(`xcode-select --install`).
 
-Fork `microsoft/winget-pkgs` to `tmunzer-AIDE/winget-pkgs` (keep the default
-name, "Copy the master branch only" is fine).
+### 2. Signing settings
 
-### 2. Tokens
+Copy `.release.env.example` to `.release.env` (git-ignored) and fill in:
 
-| Secret | How to create it |
+| Setting | Value |
 | --- | --- |
-| `TAP_GITHUB_TOKEN` | Fine-grained PAT (Settings, Developer settings, Personal access tokens, Fine-grained). Resource owner `tmunzer-AIDE`, "Only select repositories": `homebrew-tap` and `scoop-bucket`. Repository permissions: Contents, Read and write. |
-| `WINGET_GITHUB_TOKEN` | Fine-grained PAT, resource owner `tmunzer-AIDE`, repository `winget-pkgs` (the fork), Contents: Read and write. |
+| `CODESIGN_IDENTITY` | The **Developer ID Application** identity, as listed by `security find-identity -v -p codesigning`. The same value you use as `CODESIGN_IDENTITY` elsewhere works. |
+| `NOTARY_PROFILE` | A `notarytool` keychain profile. Create one with `xcrun notarytool store-credentials mistctl-notary --apple-id <apple id> --team-id <TEAMID>` (it asks for an app-specific password from account.apple.com), or reuse an existing profile. |
 
-Set an expiry you will remember (for example one year) and note it: an
-expired token makes the corresponding step fail on the next release.
+Variables already exported in your shell take precedence over the file.
+A "Developer ID Installer" identity is not needed: mistctl ships archives and
+a Homebrew cask, not a `.pkg`.
 
-### 3. macOS signing and notarization
+### 3. Package repositories
 
-GoReleaser signs and notarizes on the Linux runner (no Mac needed). It needs a
-**Developer ID Application** certificate. An "Apple Development" or "Mac App
-Distribution" certificate does not work. On a team account only the Account
-Holder can create Developer ID certificates.
+`make release-repos` creates two public repositories, each with a README so
+GoReleaser can push to them, and forks winget-pkgs:
 
-1. Certificate: developer.apple.com, Certificates, IDs & Profiles,
-   Certificates, "+", **Developer ID Application** (G2 Sub-CA). Create a CSR
-   with Keychain Access (Certificate Assistant, Request a Certificate from a
-   Certificate Authority, "Saved to disk"), upload it, download the `.cer` and
-   double-click it to add it to the login keychain.
-2. Export: in Keychain Access, My Certificates, right-click "Developer ID
-   Application: ..." (it must show the private key underneath), Export, format
-   `.p12`, set a password.
-3. Notary API key: appstoreconnect.apple.com, Users and Access, Integrations,
-   App Store Connect API, Team Keys, "+". Role **Developer** is enough. Note
-   the **Issuer ID** (top of the page) and **Key ID**, and download
-   `AuthKey_<KEYID>.p8` (it can only be downloaded once).
-4. Add the secrets:
-
-| Secret | Value |
+| Repository | GoReleaser writes |
 | --- | --- |
-| `MACOS_SIGN_P12` | `base64 -i developer_id.p12 \| pbcopy` |
-| `MACOS_SIGN_PASSWORD` | password of the .p12 |
-| `MACOS_NOTARY_ISSUER_ID` | Issuer ID |
-| `MACOS_NOTARY_KEY_ID` | Key ID |
-| `MACOS_NOTARY_KEY` | `base64 -i AuthKey_<KEYID>.p8 \| pbcopy` |
+| `tmunzer-AIDE/homebrew-tap` | `Casks/mistctl.rb` |
+| `tmunzer-AIDE/scoop-bucket` | `mistctl.json` |
+| `tmunzer-AIDE/winget-pkgs` (fork) | a `mistctl-<version>` branch |
 
-Homebrew disables casks that fail Gatekeeper, so the cask is only pushed to
-the tap when `MACOS_SIGN_P12` is set as well as `TAP_GITHUB_TOKEN`.
+Homebrew disables casks that fail Gatekeeper, so the cask is only pushed when
+`CODESIGN_IDENTITY` is set.
 
 ### 4. Windows signing (optional)
 
@@ -110,65 +80,69 @@ no longer issue exportable `.pfx` files. The practical options are:
   Canada, EU and UK, and to individuals in the US and Canada. This needs an
   Azure subscription and a change to `scripts/sign-windows.sh` to sign with
   `jsign --storetype TRUSTEDSIGNING`.
-- **An existing `.pfx`** (older certificate, or one issued by a corporate CA
-  for internal use): add it as below and `scripts/sign-windows.sh` signs with
-  `osslsigncode`.
+- **An existing `.pfx`**: `brew install osslsigncode`, then export
+  `WINDOWS_SIGN_PFX` (`base64 -i codesign.pfx`) and `WINDOWS_SIGN_PASSWORD`
+  before `make release`; `scripts/sign-windows.sh` signs with `osslsigncode`.
 
-| Secret | Value |
-| --- | --- |
-| `WINDOWS_SIGN_PFX` | `base64 -i codesign.pfx` |
-| `WINDOWS_SIGN_PASSWORD` | password of the .pfx |
+## What `make release` does
 
-## Cutting a release
+1. Checks: on `main`, clean tree, in sync with `origin/main`, no GitHub
+   release with that version yet, signing identity and notary profile valid.
+   Warns if CI on the commit is not green.
+2. Runs `go vet` and `go test`.
+3. Asks for confirmation, creates the annotated tag and pushes it.
+4. Runs `goreleaser release --clean` with `gh auth token` as the GitHub
+   token. For each macOS binary, `scripts/sign-macos.sh` signs it with
+   hardened runtime and a secure timestamp, submits it to the notary service
+   and fails the release unless it is `Accepted` (printing the notary log).
+   A bare binary cannot carry a stapled ticket; Gatekeeper checks the
+   notarization online on first run.
+5. GoReleaser creates the draft release and pushes the cask, the Scoop
+   manifest and the winget branch.
 
-```sh
-git checkout main && git pull
-git tag -a v0.1.0 -m "mistctl v0.1.0"
-git push origin v0.1.0
-```
+## Reviewing and publishing
 
-Then:
-
-1. Watch the `release` workflow in the Actions tab.
-2. Open the draft release and check: six archives (linux, darwin, windows x
+1. Open the draft release and check: six archives (linux, darwin, windows x
    amd64, arm64), `.deb`/`.rpm`/`.apk` for amd64 and arm64, `checksums.txt`,
    SBOMs, and the generated changelog.
-3. Optional checks on a Mac: `codesign -dv --verbose=2 mistctl` shows
-   "Developer ID Application" and `spctl -a -vvv -t install mistctl` says
-   "accepted, source=Notarized Developer ID".
-4. Publish the draft. The cask and Scoop manifest already point at the
-   release URLs, which start working once the release is public.
-5. winget: GoReleaser pushed a `mistctl-<version>` branch to
-   `tmunzer-AIDE/winget-pkgs`. Open it on GitHub, "Compare & pull request"
-   against `microsoft/winget-pkgs` `master`. The first PR asks you to sign the
-   Microsoft CLA and goes through manual moderation, which can take a few
-   days. (The PR is not opened automatically because winget validation
-   downloads the installer, which fails while the release is still a draft.)
-6. Smoke test: `brew install --cask tmunzer-AIDE/tap/mistctl`,
+2. Optional: download a darwin archive and run
+   `codesign -dv --verbose=2 mistctl` (shows "Developer ID Application") and
+   `spctl -a -vvv -t install mistctl` ("accepted, source=Notarized Developer
+   ID").
+3. `make publish VERSION=...`. The cask and Scoop manifest already point at
+   the release URLs, which start working once the release is public.
+4. `make winget-pr VERSION=...`. The first PR asks you to sign the Microsoft
+   CLA and goes through manual moderation, which can take a few days. (The PR
+   is not opened at release time because winget validation downloads the
+   installer, which fails while the release is still a draft.)
+5. Smoke test: `brew install --cask tmunzer-AIDE/tap/mistctl`,
    `scoop bucket add mistctl https://github.com/tmunzer-AIDE/scoop-bucket`
    then `scoop install mistctl`.
 
-## How the release workflow is hardened
+## CI fallback
+
+`.github/workflows/release.yml` is manual only (Actions, release, "Run
+workflow", with an existing tag). It builds and publishes everything except a
+signed macOS build, so the Homebrew cask is skipped. It needs the
+`TAP_GITHUB_TOKEN` and `WINGET_GITHUB_TOKEN` repository secrets (fine-grained
+PATs with Contents read and write on the tap and bucket, and on the fork).
+Its hardening:
 
 - Tests run in a separate `test` job that holds no secret and a read-only
-  token. The `goreleaser` job, which holds the signing and publishing
-  secrets, runs no test and no `go mod tidy`: only `go mod verify`, the
-  build (`-mod=readonly`) and the publishers. Shell completions (`go run`)
-  are generated in a step before the secrets are in scope.
+  token. The `goreleaser` job runs no test and no `go mod tidy`: only
+  `go mod verify`, the build (`-mod=readonly`) and the publishers.
 - Every action is pinned to a commit SHA, and GoReleaser, syft and
   govulncheck to exact versions. Dependabot bumps the action SHAs; bump the
   GoReleaser version (`version:` in `ci.yml` and `release.yml`) by hand.
-- `checksums.txt` gets a build provenance attestation. Anyone can check a
-  download with `gh attestation verify <file> -R tmunzer-AIDE/mistctl`.
-  Attestations need a public repository (or a paid plan): on a private repo
-  the step fails without failing the release.
-- Windows binaries are timestamped with RFC 3161 (`osslsigncode -ts`).
+- `checksums.txt` gets a build provenance attestation
+  (`gh attestation verify <file> -R tmunzer-AIDE/mistctl`). Local releases do
+  not have one.
 
 ## Local dry run
 
 ```sh
 make check      # goreleaser check
-make snapshot   # goreleaser release --snapshot --clean --skip=sign,notarize,sbom
+make snapshot   # unsigned build into dist/, nothing published
 ```
 
 Output lands in `dist/`, including the generated cask (`dist/homebrew`),
