@@ -66,6 +66,11 @@ type resource struct {
 	DefaultLimit int
 	// FlagValues lists the accepted values of enum flags, for completion.
 	FlagValues map[string][]string
+	// DescribeArg, DescribeLong and DescribeExample customize the help of
+	// `describe RESOURCE` (defaults: NAME, none, none).
+	DescribeArg     string
+	DescribeLong    string
+	DescribeExample string
 }
 
 // described is the result of `describe`.

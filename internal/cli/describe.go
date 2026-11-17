@@ -37,8 +37,14 @@ With -o json or -o yaml only the full document is printed.`,
 			continue // list-only resource (alarms, events, stats searches)
 		}
 		o := &listOpts{}
+		arg := r.DescribeArg
+		if arg == "" {
+			arg = "NAME"
+		}
 		sub := &cobra.Command{
-			Use:               r.Singular + " NAME",
+			Use:               r.Singular + " " + arg,
+			Long:              r.DescribeLong,
+			Example:           r.DescribeExample,
 			Aliases:           append([]string{r.Name}, r.Aliases...),
 			Short:             "Describe a " + r.Singular,
 			Args:              cobra.ExactArgs(1),

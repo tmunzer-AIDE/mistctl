@@ -340,8 +340,18 @@ func portsResource() *resource {
 			return searchPorts(ctx, a, typ, up, mac, nil, o.limit)
 		},
 		DescribeFlags: func(fs *pflag.FlagSet, o *listOpts) {
-			fs.StringVar(&o.device, "device", "", "device of the port (name, ID or MAC); or use DEVICE:PORT")
+			fs.StringVar(&o.device, "device", "", "device the port belongs to (name, ID or MAC); instead of the DEVICE: prefix")
 		},
+		DescribeArg: "[DEVICE:]PORT",
+		DescribeLong: `Show a summary and every stat of one switch or gateway port.
+
+The port is identified by its device and its port ID, given either as one
+DEVICE:PORT argument or as PORT plus --device. DEVICE can be a device name,
+ID or MAC address. With PORT alone, the port must exist on only one device
+in the current scope (site or org).`,
+		DescribeExample: `  mistctl describe port sw-core:ge-0/0/1
+  mistctl describe port ge-0/0/1 --device sw-core
+  mistctl describe port ge-0/0/1 --device 5c:5b:35:00:00:02 -o json`,
 		Describe: describePort,
 	}
 }
