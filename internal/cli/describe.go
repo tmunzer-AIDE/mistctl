@@ -84,7 +84,13 @@ cannot be described; use ` + "`mistctl get RESOURCE -o yaml`" + ` to see all the
 		if r.DescribeFlags != nil {
 			r.DescribeFlags(sub.Flags(), o)
 		}
-		cmd.AddCommand(sub)
+		if sub.Flags().Lookup("type") != nil && r.Name == "clients" {
+			_ = sub.RegisterFlagCompletionFunc("type", fixedCompletion(clientTypes...))
+		}
+		if sub.Flags().Lookup("device") != nil {
+			_ = sub.RegisterFlagCompletionFunc("device", a.completeDevices)
+		}
+		cmd.AddCommand(withFormats(sub, "table", "wide", "json", "yaml"))
 	}
-	return cmd
+	return withFormats(cmd, output.Formats...)
 }

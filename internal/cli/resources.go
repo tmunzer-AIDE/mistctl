@@ -56,6 +56,11 @@ type resource struct {
 	EnrichAlways bool
 	// ColumnsFor overrides Columns when the columns depend on flags.
 	ColumnsFor func(o *listOpts) []output.Column
+	// NameKeys are the fields printed by -o name: the first non-empty one,
+	// or all of them joined with ":" when NameJoin is set. A key can list
+	// fallbacks as "a|b". Default: name, hostname, mac, id.
+	NameKeys []string
+	NameJoin bool
 	// MatchKeys are the fields `get RESOURCE NAME` compares NAME with
 	// (default: name, hostname, id, and mac for MAC-looking queries).
 	MatchKeys []string
@@ -84,6 +89,36 @@ type resource struct {
 type described struct {
 	Header [][2]string
 	Doc    json.RawMessage
+}
+
+// nameFunc returns the -o name identifier of the resource's items.
+func (r *resource) nameFunc() func(map[string]any) string {
+	if len(r.NameKeys) == 0 {
+		return nil
+	}
+	first := func(m map[string]any, keys string) string {
+		for _, k := range strings.Split(keys, "|") {
+			if v := output.Text(output.Get(m, k)); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+	return func(m map[string]any) string {
+		if r.NameJoin {
+			parts := make([]string, 0, len(r.NameKeys))
+			for _, k := range r.NameKeys {
+				parts = append(parts, first(m, k))
+			}
+			return strings.Join(parts, ":")
+		}
+		for _, k := range r.NameKeys {
+			if v := first(m, k); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
 }
 
 func (r *resource) names() []string {
@@ -125,6 +160,34 @@ func init() {
 		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(),
 	}
 	applyResourceHelp()
+	applyNameKeys()
+}
+
+// applyNameKeys sets the stable identifier -o name prints for resources
+// whose rows have no (unique) name.
+func applyNameKeys() {
+	keys := map[string][]string{
+		"clients":    {"mac"},
+		"wlans":      {"ssid", "id"},
+		"rrm":        {"band"},
+		"alarms":     {"id"},
+		"events":     {"type"},
+		"sles":       {"site_name|site_id"},
+		"rrm-events": {"device_name|ap"},
+	}
+	joined := map[string][]string{
+		"ports":      {"device_name|mac", "port_id"},
+		"bgp-peers":  {"device_name|mac", "neighbor"},
+		"ospf-peers": {"device_name|mac", "peer_ip"},
+	}
+	for _, r := range registry {
+		if k, ok := keys[r.Name]; ok {
+			r.NameKeys = k
+		}
+		if k, ok := joined[r.Name]; ok {
+			r.NameKeys, r.NameJoin = k, true
+		}
+	}
 }
 
 // ---- orgs -----------------------------------------------------------------

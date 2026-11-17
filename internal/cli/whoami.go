@@ -12,7 +12,7 @@ import (
 )
 
 func newWhoamiCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	return withFormats(&cobra.Command{
 		Use:   "whoami",
 		Short: "Show the identity and privileges of the current token",
 		Long: `Show who the current API token belongs to, which cloud and context are in
@@ -98,7 +98,7 @@ With -o json or -o yaml, prints the raw answer of GET /api/v1/self.`,
 			}
 			return nil
 		},
-	}
+	}, "table", "wide", "json", "yaml")
 }
 
 func deref(s *string) string {

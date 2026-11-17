@@ -2,10 +2,10 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -129,6 +129,7 @@ names are resolved when a command runs.`,
 	f.StringVar(&org, "org", "", "default org name or ID")
 	f.StringVar(&site, "site", "", "default site name or ID (empty to clear)")
 	f.BoolVar(&use, "use", false, "also make this the current context")
+	cmd.MarkFlagsMutuallyExclusive("token", "token-stdin", "token-env")
 	_ = cmd.RegisterFlagCompletionFunc("cloud", fixedCompletion(cloud.Names()...))
 	_ = cmd.RegisterFlagCompletionFunc("token", cobra.NoFileCompletions)
 	cmd.ValidArgsFunction = a.completeContexts
@@ -164,34 +165,45 @@ or $MISTCTL_CONTEXT says otherwise.`,
 }
 
 func newGetContextsCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	return withFormats(&cobra.Command{
 		Use:     "get-contexts",
 		Aliases: []string{"contexts"},
 		Short:   "List contexts",
 		Long: `List the contexts of the config file with their cloud, default org and site,
 and where their token comes from (a masked value, or the environment variable
-it is read from). The current context is marked with *.`,
+it is read from). The current context is marked with *. Tokens are always
+masked; -o json, -o yaml and -o name are supported.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.config()
 			if err != nil {
 				return err
 			}
-			tw := tabwriter.NewWriter(a.out, 0, 0, 3, ' ', 0)
-			if !a.noHeaders {
-				fmt.Fprintln(tw, "CURRENT\tNAME\tCLOUD\tORG\tSITE\tTOKEN")
-			}
+			items := make([]json.RawMessage, 0, len(cfg.Contexts))
 			for _, n := range cfg.Names() {
 				c := cfg.Contexts[n]
-				cur := ""
-				if n == cfg.CurrentContext {
-					cur = "*"
-				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", cur, output.Safe(n), output.Safe(c.Cloud), output.Safe(orDash(c.Org)), output.Safe(orDash(c.Site)), output.Safe(tokenSource(c)))
+				items = append(items, mustJSON(map[string]any{
+					"current": n == cfg.CurrentContext, "name": n, "cloud": c.Cloud,
+					"org": c.Org, "site": c.Site, "token": tokenSource(c),
+				}))
 			}
-			return tw.Flush()
+			star := func(v any) string {
+				if b, _ := v.(bool); b {
+					return "*"
+				}
+				return " "
+			}
+			cols := []output.Column{
+				output.Col("CURRENT", "current").WithFormat(star),
+				output.Col("NAME", "name"),
+				output.Col("CLOUD", "cloud"),
+				output.Col("ORG", "org"),
+				output.Col("SITE", "site"),
+				output.Col("TOKEN", "token"),
+			}
+			return output.Printer{Format: a.output, NoHeaders: a.noHeaders}.PrintList(a.out, items, cols)
 		},
-	}
+	}, output.Formats...)
 }
 
 func tokenSource(c *config.Context) string {
@@ -296,11 +308,11 @@ func newViewConfigCmd(a *app) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&raw, "raw", false, "show tokens in clear text")
-	return cmd
+	return withFormats(cmd, "table", "json", "yaml")
 }
 
 func newCloudsCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	return withFormats(&cobra.Command{
 		Use:   "clouds",
 		Short: "List the Mist clouds mistctl can talk to",
 		Long: `List the Mist clouds with their API and portal hosts. --cloud (in
@@ -308,12 +320,14 @@ func newCloudsCmd(a *app) *cobra.Command {
 the portal host, so the URL you use to log in to Mist works too.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tw := tabwriter.NewWriter(a.out, 0, 0, 3, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tAPI HOST\tPORTAL")
+			items := make([]json.RawMessage, 0, len(cloud.All))
 			for _, c := range cloud.All {
-				fmt.Fprintf(tw, "%s\t%s\t%s\n", c.Name, c.Host, strings.Replace(c.Host, "api.", "manage.", 1))
+				items = append(items, mustJSON(map[string]any{
+					"name": c.Name, "api_host": c.Host, "portal": strings.Replace(c.Host, "api.", "manage.", 1),
+				}))
 			}
-			return tw.Flush()
+			cols := []output.Column{output.Col("NAME", "name"), output.Col("API HOST", "api_host"), output.Col("PORTAL", "portal")}
+			return output.Printer{Format: a.output, NoHeaders: a.noHeaders}.PrintList(a.out, items, cols)
 		},
-	}
+	}, output.Formats...)
 }

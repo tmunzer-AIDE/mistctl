@@ -186,6 +186,9 @@ type Printer struct {
 
 // PrintList prints a list of raw JSON objects.
 func (p Printer) PrintList(w io.Writer, items []json.RawMessage, cols []Column) error {
+	if items == nil {
+		items = []json.RawMessage{} // an empty list is [], never null
+	}
 	switch p.Format {
 	case "json":
 		return writeJSON(w, items)

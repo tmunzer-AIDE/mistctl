@@ -44,7 +44,7 @@ NAME filters the list (name, ID or MAC address, depending on the resource).`,
 		sub.GroupID = r.Group
 		cmd.AddCommand(sub)
 	}
-	return cmd
+	return withFormats(cmd, output.Formats...)
 }
 
 func newGetResourceCmd(a *app, r *resource) *cobra.Command {
@@ -57,9 +57,17 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 		Example: r.Example,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			if o.limit < 0 {
+				return fmt.Errorf("invalid --limit %d (must be 0 for all, or more)", o.limit)
+			}
 			items, err := r.List(ctx, a, o)
 			if err != nil {
 				return err
+			}
+			// --limit always caps the rows, even for resources whose API
+			// returns everything in one answer.
+			if o.limit > 0 && len(items) > o.limit {
+				items = items[:o.limit]
 			}
 			// Enrich first so NAME can match derived fields (device_name, ...).
 			if r.Enrich != nil && (r.EnrichAlways || a.output == "wide" || a.output == "json" || a.output == "yaml") {
@@ -86,11 +94,11 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 				fmt.Fprintf(a.err, "No %s found.\n", r.Name)
 				return nil
 			}
-			p := output.Printer{Format: a.output, NoHeaders: a.noHeaders}
+			p := output.Printer{Format: a.output, NoHeaders: a.noHeaders, NameFunc: r.nameFunc()}
 			return p.PrintList(a.out, items, cols)
 		},
 	}
-	cmd.Flags().IntVar(&o.limit, "limit", r.DefaultLimit, "maximum number of items to fetch (0 = all)")
+	cmd.Flags().IntVar(&o.limit, "limit", r.DefaultLimit, "maximum number of items to fetch and show (0 = all); NAME arguments filter the fetched items")
 	if r.Flags != nil {
 		r.Flags(cmd.Flags(), o)
 	}
@@ -98,17 +106,26 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 		_ = cmd.RegisterFlagCompletionFunc(name, fixedCompletion(values...))
 	}
 	if f := cmd.Flags().Lookup("type"); f != nil && r.FlagValues["type"] == nil {
-		types := deviceTypes
-		if r.Name == "clients" {
-			types = clientTypes
+		// Device and client types are enums; alarm and event types are
+		// free-form (and many), so they get no suggestions rather than
+		// wrong ones.
+		switch r.Name {
+		case "devices":
+			_ = cmd.RegisterFlagCompletionFunc("type", fixedCompletion(deviceTypes...))
+		case "clients":
+			_ = cmd.RegisterFlagCompletionFunc("type", fixedCompletion(clientTypes...))
+		default:
+			_ = cmd.RegisterFlagCompletionFunc("type", cobra.NoFileCompletions)
 		}
-		_ = cmd.RegisterFlagCompletionFunc("type", fixedCompletion(types...))
+	}
+	if f := cmd.Flags().Lookup("device"); f != nil {
+		_ = cmd.RegisterFlagCompletionFunc("device", a.completeDevices)
 	}
 	if f := cmd.Flags().Lookup("status"); f != nil && r.FlagValues["status"] == nil {
 		_ = cmd.RegisterFlagCompletionFunc("status", fixedCompletion("connected", "disconnected"))
 	}
 	cmd.ValidArgsFunction = a.completeNames(r)
-	return cmd
+	return withFormats(cmd, output.Formats...)
 }
 
 // filterItems keeps items whose name, hostname, id or MAC (or the given

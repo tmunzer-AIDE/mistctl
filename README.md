@@ -136,8 +136,27 @@ any format (`5c5b35000001`, `5C:5B:35:00:00:01`, `5c-5b-...`).
 | `--no-cache` | Resolve names live instead of from the cache |
 | `-v, --verbose` | Print each HTTP request with status and timing |
 
-JSON and YAML output is the API response exactly as returned (key order
-preserved), plus a `site_name` field on devices and clients for convenience.
+JSON and YAML output carries every field of the API objects, in the API's key
+order, with these documented changes: search envelopes are flattened to the
+list of results (an empty result is `[]`); convenience fields are added
+(`site_name`, `device_name`, `client_type`); a MAC seen both wireless and wired
+is one client object with the wired records under `wired`; `rrm` reshapes the
+site RRM document into one row per band; `describe` combines objects under
+keys such as `config` and `stats`, and adds `stats_error` when the stats
+could not be read. `-o name` prints one stable identifier per row (MAC for
+clients, SSID for WLANs, `DEVICE:PORT` for ports, band for RRM).
+
+`get`, `describe`, `api-resources`, `config get-contexts` and `config clouds`
+support every format; `whoami`, `usage` and `config view` support table, json
+and yaml. Other commands reject `-o json/yaml/name` instead of ignoring it.
+
+`--limit` caps the rows fetched and shown (0 means all); NAME arguments and
+local filters apply to the fetched rows. `--duration` accepts Mist units
+(`30m`, `12h`, `7d`, `2w`); historical searches use one fixed time window for
+every page.
+
+mistctl exits with status 0 on success and 1 on any error; errors and
+warnings (for example, stats that could not be read) go to stderr.
 
 ## Contexts and configuration
 

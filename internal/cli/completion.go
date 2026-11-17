@@ -80,3 +80,7 @@ func (a *app) completeContexts(cmd *cobra.Command, args []string, toComplete str
 	}
 	return cfg.Names(), cobra.ShellCompDirectiveNoFileComp
 }
+
+func (a *app) completeDevices(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return a.completeIndex(cmd, kindDevices, toComplete, true), cobra.ShellCompDirectiveNoFileComp
+}

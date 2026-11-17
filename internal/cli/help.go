@@ -42,13 +42,13 @@ var resourceHelps = map[string]resourceHelp{
 		group: "inventory", title: "organization",
 		about:            "Lists the organizations of the token's privileges, with the role the token has in each. No org needs to be selected.",
 		examples:         []string{"get orgs", "get orgs -o wide"},
-		describe:         "Prints the org settings and its counters (sites, devices, connected and disconnected devices, inventory).",
+		describe:         "Prints the org object (GET /orgs/{org_id}) and its counters (sites, devices, connected and disconnected devices, inventory). This is the org itself, not the org settings endpoint.",
 		describeExamples: []string{"describe org ACME", "describe org ACME -o json"},
 	},
 	"sites": {
 		group: "inventory", title: "site",
 		examples:         []string{"get sites", "get sites -o wide", "get site HQ -o yaml"},
-		describe:         "Prints the site settings and its counters (connected APs, switches and gateways, clients).",
+		describe:         "Prints the site object (GET /sites/{site_id}) and its counters (connected APs, switches and gateways, clients). This is the site itself, not its settings or derived settings.",
 		describeExamples: []string{"describe site HQ"},
 	},
 	"devices": {
@@ -317,9 +317,10 @@ func (r *resource) getLong() string {
 		keys = orList(labels)
 	}
 	parts = append(parts, wrap(fmt.Sprintf("NAME: when given, only the rows whose %s equals one of the NAMEs are shown.", keys)))
-	out := "Output: -o json and -o yaml print every field returned by the API."
+	structured := "-o json and -o yaml print the API objects with every field (search\nresults without their envelope, plus fields mistctl adds such as site_name);\n-o name prints one identifier per row."
+	out := "Output: " + structured
 	if wide := r.wideHeaders(); len(wide) > 0 {
-		out = wrap("Output: -o wide adds the columns "+strings.Join(wide, ", ")+".") + "\n-o json and -o yaml print every field returned by the API."
+		out = wrap("Output: -o wide adds the columns "+strings.Join(wide, ", ")+".") + "\n" + structured
 	}
 	parts = append(parts, out)
 	if r.Describe != nil {

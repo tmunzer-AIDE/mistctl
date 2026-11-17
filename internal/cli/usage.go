@@ -12,7 +12,7 @@ import (
 )
 
 func newUsageCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	return withFormats(&cobra.Command{
 		Use:     "usage",
 		Aliases: []string{"ratelimit", "rate-limit"},
 		Short:   "Show the remaining API budget of the current token",
@@ -61,5 +61,5 @@ rate-limit window, how many remain, and when the window resets. Mist allows
 			})
 			return nil
 		},
-	}
+	}, "table", "wide", "json", "yaml")
 }
