@@ -313,11 +313,13 @@ func alarmTemplatesResource() *resource {
 			output.Col("AGE", "created_time").WithFormat(output.Age).AsWide(),
 			output.Col("MODIFIED", "modified_time").WithFormat(output.Age).AsWide(),
 		},
-		org: func(ctx context.Context, cl *client.Client, id uuid.UUID, limit, page int) (client.Raw, error) {
-			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.AlarmTemplate], error) {
-				return cl.SDK.OrgsAlarmTemplates().ListOrgAlarmTemplates(ctx, id, &limit, &page)
-			})
-		},
+		org: listOrgAlarmTemplates,
+	})
+}
+
+func listOrgAlarmTemplates(ctx context.Context, cl *client.Client, id uuid.UUID, limit, page int) (client.Raw, error) {
+	return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.AlarmTemplate], error) {
+		return cl.SDK.OrgsAlarmTemplates().ListOrgAlarmTemplates(ctx, id, &limit, &page)
 	})
 }
 

@@ -35,6 +35,7 @@ type listOpts struct {
 	mac        string // inventory, clients, nac/wan clients
 	state      string // inventory: assigned, unassigned
 	derived    bool   // site-settings
+	template   string // sites
 	// historical searches
 	start, end string
 	sortOrder  string // newest, oldest
@@ -325,16 +326,28 @@ func sitesResource() *resource {
 			output.Col("ADDRESS", "address").AsWide(),
 			output.Col("AGE", "created_time").WithFormat(output.Age).AsWide(),
 		},
+		Flags: func(fs *pflag.FlagSet, o *listOpts) {
+			fs.StringVar(&o.sitegroup, "sitegroup", "", "only the sites of this site group (name or ID)")
+			fs.StringVar(&o.template, "template", "", "only the sites using this RF, AP, switch, WAN edge or alarm template (name or ID)")
+		},
 		List: func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
 			org, err := a.orgID(ctx)
 			if err != nil {
 				return nil, err
 			}
-			items, err := a.listSites(ctx, org, o.limit)
-			if err == nil && o.limit == 0 {
+			filtered := o.sitegroup != "" || o.template != ""
+			max := o.limit
+			if filtered {
+				max = 0
+			}
+			items, err := a.listSites(ctx, org, max)
+			if err == nil && max == 0 {
 				a.storeIndex(kindSites, org.String(), items)
 			}
-			return items, err
+			if err != nil || !filtered {
+				return items, err
+			}
+			return filterSites(ctx, a, items, o)
 		},
 		Describe: func(ctx context.Context, a *app, name string) (*described, error) {
 			e, err := a.lookup(ctx, kindSites, name)
@@ -383,6 +396,82 @@ func sitesResource() *resource {
 			}).noteUnavailable(a, "stats", serr), nil
 		},
 	}
+}
+
+// filterSites keeps the sites of --sitegroup and --template.
+func filterSites(ctx context.Context, a *app, items []json.RawMessage, o *listOpts) ([]json.RawMessage, error) {
+	cl, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	var groupID string
+	if o.sitegroup != "" {
+		groups, err := listConfig(ctx, a, siteGroupsSpec(), 0)
+		if err != nil {
+			return nil, err
+		}
+		g, err := pickOne(groups, o.sitegroup, []string{"name", "id"}, "sitegroup")
+		if err != nil {
+			return nil, err
+		}
+		groupID = output.Text(output.Decode(g)["id"])
+	}
+	tmplIDs := map[string]bool{}
+	if o.template != "" {
+		if _, ok := client.ParseUUID(o.template); ok {
+			tmplIDs[strings.ToLower(o.template)] = true
+		} else {
+			org, err := a.orgID(ctx)
+			if err != nil {
+				return nil, err
+			}
+			for _, list := range []pager{listOrgRfTemplates, listOrgApTemplates, listOrgNetworkTemplates, listOrgGatewayTemplates, listOrgAlarmTemplates} {
+				ts, err := client.ListAll(ctx, 0, func(ctx context.Context, limit, page int) (client.Raw, error) {
+					return list(ctx, cl, org, limit, page)
+				})
+				if err != nil {
+					return nil, err
+				}
+				for _, t := range ts {
+					if m := output.Decode(t); strings.EqualFold(output.Text(m["name"]), o.template) {
+						tmplIDs[strings.ToLower(output.Text(m["id"]))] = true
+					}
+				}
+			}
+			if len(tmplIDs) == 0 {
+				return nil, fmt.Errorf("template %q not found (RF, AP, switch, WAN edge and alarm templates)", o.template)
+			}
+		}
+	}
+	var out []json.RawMessage
+	for _, it := range items {
+		m := output.Decode(it)
+		if groupID != "" {
+			in := false
+			if ids, ok := m["sitegroup_ids"].([]any); ok {
+				for _, id := range ids {
+					in = in || output.Text(id) == groupID
+				}
+			}
+			if !in {
+				continue
+			}
+		}
+		if len(tmplIDs) > 0 {
+			in := false
+			for _, k := range []string{"rftemplate_id", "aptemplate_id", "networktemplate_id", "gatewaytemplate_id", "alarmtemplate_id", "sitetemplate_id"} {
+				in = in || tmplIDs[strings.ToLower(output.Text(m[k]))]
+			}
+			if !in {
+				continue
+			}
+		}
+		out = append(out, it)
+		if o.limit > 0 && len(out) >= o.limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 // ---- devices --------------------------------------------------------------

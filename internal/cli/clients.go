@@ -56,7 +56,18 @@ func clientsResource() *resource {
 		},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.clientType, "type", "all", "client type: all, wireless, wired")
-			fs.StringVar(&o.duration, "duration", "1d", "search window for wired clients, and for wireless clients without --site (e.g. 1h, 1d, 7d)")
+			addWindowFlags(fs, o, "1d", "search window for wired clients, and for wireless clients without --site or with --history")
+			fs.BoolVar(&o.history, "history", false, "with --site, search the wireless clients seen during the window instead of the ones connected now")
+			fs.StringVar(&o.mac, "mac", "", "only this client MAC address")
+			fs.StringVar(&o.ip, "ip", "", "only this client IP address")
+			fs.StringVar(&o.text, "text", "", "partial match on hostname, MAC, IP, username, ...")
+			fs.StringVar(&o.vlan, "vlan", "", "only clients in this VLAN")
+			fs.StringVar(&o.device, "device", "", "only clients of this AP or switch (name, ID or MAC)")
+			fs.StringVar(&o.ssid, "ssid", "", "wireless only: only clients of this SSID")
+			fs.StringVar(&o.username, "username", "", "wireless only: only clients with this username")
+			fs.StringVar(&o.port, "port", "", "wired only: only clients learnt on this switch port (with --device)")
+			fs.StringVar(&o.authState, "auth-state", "", "wired only: 802.1X/MAB state, e.g. authenticated, unauthenticated")
+			fs.StringVar(&o.authType, "auth-method", "", "wired only: authentication method, e.g. dot1x, mab")
 		},
 		List: listClients,
 		DescribeFlags: func(fs *pflag.FlagSet, o *listOpts) {
@@ -79,15 +90,18 @@ func listClients(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, e
 	if !contains(clientTypes, o.clientType) {
 		return nil, fmt.Errorf("invalid --type %q (valid: %s)", o.clientType, strings.Join(clientTypes, ", "))
 	}
+	f, err := newClientFilter(ctx, a, o)
+	if err != nil {
+		return nil, err
+	}
 	var wireless, wired []json.RawMessage
-	var err error
-	if o.clientType != "wired" {
-		if wireless, err = listWireless(ctx, a, o); err != nil {
+	if o.clientType != "wired" && !f.wiredOnly {
+		if wireless, err = listWireless(ctx, a, o, f); err != nil {
 			return nil, err
 		}
 	}
-	if o.clientType != "wireless" {
-		if wired, err = listWired(ctx, a, o); err != nil {
+	if o.clientType != "wireless" && !f.wirelessOnly {
+		if wired, err = listWired(ctx, a, o, f); err != nil {
 			return nil, err
 		}
 	}
@@ -96,6 +110,79 @@ func listClients(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, e
 		out = out[:o.limit]
 	}
 	return out, nil
+}
+
+// clientFilter holds the client search filters, resolved once.
+type clientFilter struct {
+	mac, ip, text, vlan, ssid, username, port, authState, authMethod *string
+	device                                                           *string // normalized MAC of the AP or switch
+	wirelessOnly, wiredOnly                                          bool
+}
+
+func (f *clientFilter) any() bool {
+	for _, p := range []*string{f.mac, f.ip, f.text, f.vlan, f.ssid, f.username, f.device} {
+		if p != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func newClientFilter(ctx context.Context, a *app, o *listOpts) (*clientFilter, error) {
+	mac, err := normMAC("mac", o.mac)
+	if err != nil {
+		return nil, err
+	}
+	f := &clientFilter{
+		mac: mac, ip: client.Ptr(o.ip), text: client.Ptr(o.text), vlan: client.Ptr(o.vlan),
+		ssid: client.Ptr(o.ssid), username: client.Ptr(o.username), port: client.Ptr(o.port),
+		authState: client.Ptr(o.authState), authMethod: client.Ptr(o.authType),
+	}
+	f.wirelessOnly = f.ssid != nil || f.username != nil
+	f.wiredOnly = f.port != nil || f.authState != nil || f.authMethod != nil
+	switch {
+	case f.wirelessOnly && f.wiredOnly:
+		return nil, fmt.Errorf("--ssid/--username (wireless) and --port/--auth-state/--auth-method (wired) cannot be combined")
+	case f.wirelessOnly && o.clientType == "wired":
+		return nil, fmt.Errorf("--ssid and --username apply to wireless clients only")
+	case f.wiredOnly && o.clientType == "wireless":
+		return nil, fmt.Errorf("--port, --auth-state and --auth-method apply to wired clients only")
+	}
+	if f.device, err = a.deviceMAC(ctx, o.device); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// matchLive applies the filters to a client connected now (site stats have
+// no filter parameters).
+func (f *clientFilter) matchLive(it json.RawMessage) bool {
+	m := output.Decode(it)
+	eq := func(want *string, keys ...string) bool {
+		if want == nil {
+			return true
+		}
+		for _, k := range keys {
+			v := output.Text(m[k])
+			if strings.EqualFold(v, *want) || (cache.IsMAC(v) && cache.NormalizeMAC(v) == cache.NormalizeMAC(*want)) {
+				return true
+			}
+		}
+		return false
+	}
+	if !eq(f.mac, "mac") || !eq(f.ip, "ip") || !eq(f.vlan, "vlan_id") || !eq(f.ssid, "ssid") || !eq(f.username, "username") || !eq(f.device, "ap_mac") {
+		return false
+	}
+	if f.text != nil {
+		t := strings.ToLower(*f.text)
+		for _, k := range []string{"hostname", "mac", "ip", "username", "manufacture", "os", "ssid"} {
+			if strings.Contains(strings.ToLower(output.Text(m[k])), t) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
 
 // mergeClients tags each client with its type and folds the wired records
@@ -134,7 +221,7 @@ func mergeClients(wireless, wired []json.RawMessage) []json.RawMessage {
 	return out
 }
 
-func listWireless(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+func listWireless(ctx context.Context, a *app, o *listOpts, f *clientFilter) ([]json.RawMessage, error) {
 	cl, err := a.client()
 	if err != nil {
 		return nil, err
@@ -143,20 +230,36 @@ func listWireless(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, 
 	if err != nil {
 		return nil, err
 	}
-	if hasSite {
-		return listSiteWireless(ctx, a, cl, site, o.limit)
+	if hasSite && !o.history {
+		if !f.any() {
+			return listSiteWireless(ctx, a, cl, site, o.limit)
+		}
+		all, err := listSiteWireless(ctx, a, cl, site, 0)
+		if err != nil {
+			return nil, err
+		}
+		var out []json.RawMessage
+		for _, it := range all {
+			if f.matchLive(it) {
+				out = append(out, it)
+			}
+		}
+		return out, nil
 	}
 	org, err := a.orgID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	w, err := timeWindow(o.duration)
+	w, err := o.window()
 	if err != nil {
 		return nil, err
 	}
 	return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 		return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseClientSearch], error) {
-			return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClients(ctx, org, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
+			if hasSite {
+				return cl.SDK.SitesClientsWireless().SearchSiteWirelessClients(ctx, site, f.device, nil, nil, nil, f.ip, f.mac, nil, nil, nil, nil, f.ssid, f.text, f.username, f.vlan, &limit, w.start, w.end, nil, nil, after)
+			}
+			return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClients(ctx, org, nil, f.device, nil, nil, nil, f.ip, f.mac, nil, nil, nil, nil, f.ssid, f.text, f.username, f.vlan, &limit, w.start, w.end, nil, nil, after)
 		})
 	})
 }
@@ -220,7 +323,7 @@ func atoiHeader(s string) int {
 	return n
 }
 
-func listWired(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+func listWired(ctx context.Context, a *app, o *listOpts, f *clientFilter) ([]json.RawMessage, error) {
 	cl, err := a.client()
 	if err != nil {
 		return nil, err
@@ -229,14 +332,23 @@ func listWired(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, err
 	if err != nil {
 		return nil, err
 	}
-	w, err := timeWindow(o.duration)
+	w, err := o.window()
 	if err != nil {
 		return nil, err
 	}
 	if hasSite {
-		return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+		// The site search has no auth filters: apply them locally.
+		var keep func(json.RawMessage) bool
+		if f.authState != nil || f.authMethod != nil {
+			keep = func(it json.RawMessage) bool {
+				m := output.Decode(it)
+				return (f.authState == nil || strings.EqualFold(output.Text(m["auth_state"]), *f.authState)) &&
+					(f.authMethod == nil || strings.EqualFold(output.Text(m["auth_method"]), *f.authMethod))
+			}
+		}
+		return client.SearchFiltered(ctx, o.limit, keep, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
-				return cl.SDK.SitesClientsWired().SearchSiteWiredClients(ctx, site, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
+				return cl.SDK.SitesClientsWired().SearchSiteWiredClients(ctx, site, f.device, f.mac, f.ip, f.port, nil, f.vlan, nil, f.text, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
 			})
 		})
 	}
@@ -246,7 +358,7 @@ func listWired(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, err
 	}
 	return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 		return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
-			return cl.SDK.OrgsClientsWired().SearchOrgWiredClients(ctx, org, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
+			return cl.SDK.OrgsClientsWired().SearchOrgWiredClients(ctx, org, f.authState, f.authMethod, nil, nil, f.device, f.mac, f.port, f.vlan, f.ip, nil, f.text, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
 		})
 	})
 }

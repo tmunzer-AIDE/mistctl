@@ -390,7 +390,11 @@ func deviceProfilesResource() *resource {
 // ---- site groups ------------------------------------------------------------
 
 func siteGroupsResource() *resource {
-	return configResource(configSpec{
+	return configResource(siteGroupsSpec())
+}
+
+func siteGroupsSpec() configSpec {
+	return configSpec{
 		name: "sitegroups", singular: "sitegroup", aliases: []string{"site-groups", "site-group"},
 		short:    "Site groups (describe lists their sites)",
 		scope:    "org",
@@ -453,5 +457,5 @@ func siteGroupsResource() *resource {
 			}
 			return [][2]string{{"Members", strings.Join(names, ", ")}}
 		},
-	})
+	}
 }

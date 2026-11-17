@@ -47,7 +47,8 @@ var resourceHelps = map[string]resourceHelp{
 	},
 	"sites": {
 		group: "inventory", title: "site",
-		examples:         []string{"get sites", "get sites -o wide", "get site HQ -o yaml"},
+		about:            "--sitegroup and --template keep the sites of a site group, or the sites using an RF, AP, switch, WAN edge or alarm template (by name or ID).",
+		examples:         []string{"get sites", "get sites -o wide", "get site HQ -o yaml", "get sites --sitegroup EMEA", "get sites --template Campus-Switches"},
 		describe:         "Prints the site object (GET /sites/{site_id}) and its counters (connected APs, switches and gateways, clients). This is the site itself; see `describe site-settings` (and --derived) for its settings.",
 		describeExamples: []string{"describe site HQ"},
 	},
@@ -70,13 +71,22 @@ the API for APs, switches and gateways.`,
 	"clients": {
 		group: "inventory", title: "client",
 		about: `With a site, wireless clients are the ones connected right now (current
-state). Without a site (or with -A), and for wired clients, the list is a
-historical search over --duration. A MAC seen both wireless and wired is one
-row.`,
+state), unless --history is set. Without a site (or with -A), with
+--history, and for wired clients, the list is a historical search over
+--duration (or --start/--end). A MAC seen both wireless and wired is one row.
+
+Filters are applied by the API for searches, and locally for the clients
+connected now. --ssid and --username only exist for wireless clients, and
+--port, --auth-state and --auth-method only for wired clients: using one of
+them restricts the list to that type.`,
 		examples: []string{
 			"get clients --site HQ",
-			"get clients --site HQ --type wired -o wide",
-			"get clients -A --duration 7d",
+			"get clients -A --mac aa:bb:cc:dd:ee:ff --duration 7d",
+			"get clients --site HQ --history --ssid Corp --duration 4h",
+			"get clients -A --username jdoe",
+			"get clients --site HQ --type wired --device sw-core --port ge-0/0/12 -o wide",
+			"get clients -A --auth-state unauthenticated --auth-method dot1x",
+			"get clients -A --start 2026-11-16T08:00 --end 2026-11-16T12:00 --text printer",
 		},
 		describe:         "Prints everything known about one client: its wireless and wired views, or one of them with --type. NAME is the MAC address of the client. The client is found with an org-wide client search over --duration (default 7d); for a wireless client, its current stats are then read on the site it was last seen on. When those stats cannot be read (permissions, rate limit, service error), State says so instead of \"not connected\".",
 		describeOrgWide:  true,
@@ -239,7 +249,7 @@ WLANs plus the ones inherited from templates.`,
 	"maps": {
 		group: "config", title: "map",
 		short:            "Floor plans (maps) of a site",
-		examples:         []string{"get maps --site HQ", "get maps --site HQ -o wide"},
+		examples:         []string{"get maps --site HQ", "get maps --site HQ -o wide", "get maps --site HQ --mapstack \"Building A\""},
 		describeExamples: []string{"describe map \"Floor 1\" --site HQ"},
 	},
 	"mapstacks": {
@@ -253,28 +263,46 @@ WLANs plus the ones inherited from templates.`,
 	"alarms": {
 		group: "monitoring", title: "alarm",
 		short: "Alarms raised during a time window",
-		about: `Searches the alarms raised during --duration (default 1d), newest first.
---group and --severity accept several comma-separated values.`,
+		about: `Searches the alarms raised during --duration (default 1d), or between
+--start and --end, newest first (--sort oldest reverses it). --group and
+--severity accept several comma-separated values. --acked false keeps the
+unacknowledged alarms. Marvis alarms carry their resolution state: -o wide
+shows STATUS, RESOLVED and NOTE, and --status filters on it (locally).
+` + "`mistctl get alarm-definitions`" + ` lists the alarm types (--type completes them).
+
+Without a site (or with -A) the search covers the whole org; with --site,
+only that site.`,
 		examples: []string{
 			"get alarms",
-			"get alarms --site HQ --duration 7d",
+			"get alarms -A --duration 7d",
+			"get alarms --site HQ --acked false",
 			"get alarms --group infra,security --severity critical",
-			"get alarms --type switch_down -o wide",
+			"get alarms --group marvis --duration 7d -o wide",
+			"get alarms --type switch_down --start 2026-11-16 --end 2026-11-17",
 		},
 	},
 	"events": {
 		group: "monitoring", title: "event",
-		short: "Device, client or system events during a time window",
-		about: `Searches events during --duration (default 1d), newest first. --source picks
-the kind of events: device (default), client (wireless client events) or
-system (configuration and audit-style events). --limit caps the number of
-events shown (default 1000, the newest ones); pass --limit 0 for all of them.
-Org-wide system events have no API type filter: --type is applied locally and
-mistctl reads further pages until --limit matching events are found.`,
+		short: "Device, client, system, NAC or WAN client events during a time window",
+		about: `Searches events during --duration (default 1d), or between --start and
+--end, newest first. --source picks the kind of events: device (default),
+client (wireless client events), system (configuration and audit-style
+events), nac (Mist NAC authentications) or wan (clients of WAN edges).
+--limit caps the number of events shown (default 1000, the newest ones);
+pass --limit 0 for all of them.
+
+Some filters only exist for some sources (an error says so). The API has no
+client filter for wireless client events, nor a type filter for org-wide
+system events: those are applied locally, and mistctl reads further pages
+until --limit matching events are found.
+` + "`mistctl get event-definitions --source SOURCE`" + ` lists the event types.`,
 		examples: []string{
 			"get events --site HQ",
-			"get events --device sw-core --type SW_PORT_DOWN --duration 7d",
-			"get events --source client --site HQ --type CLIENT_DEAUTHENTICATED",
+			"get events -A --device sw-core --type SW_PORT_DOWN --duration 7d",
+			"get events --source client --site HQ --client aa:bb:cc:dd:ee:ff --band 5",
+			"get events --source client -A --type CLIENT_DEAUTHENTICATED --reason 15",
+			"get events --source nac --client aa:bb:cc:dd:ee:ff --type NAC_CLIENT_DENY",
+			"get events --source wan -A --duration 4h",
 			"get events --source system -A",
 		},
 	},
@@ -338,22 +366,30 @@ tunnels between APs and Mist Edges. Every filter is applied by the API.`,
 	"bgp-peers": {
 		group: "stats", title: "BGP peer",
 		short:    "BGP peers of switches and WAN edges",
-		examples: []string{"get bgp-peers --site HQ", "get bgp-peers -A --device gw-01 -o wide", "get bgp-peers --vrf default"},
+		about:    "Shows the current state of the peers. --up and --neighbor are applied locally; --start/--end read the peer state over a past time range.",
+		examples: []string{"get bgp-peers --site HQ", "get bgp-peers -A --device gw-01 -o wide", "get bgp-peers --vrf default", "get bgp-peers -A --up false", "get bgp-peers -A --neighbor 10.0.0.2"},
 	},
 	"ospf-peers": {
 		group: "stats", title: "OSPF peer",
 		short:    "OSPF peers of switches and WAN edges",
-		examples: []string{"get ospf-peers --site HQ", "get ospf-peers -A --device sw-core"},
+		about:    "Shows the current state of the peers. --up is applied locally; --start/--end read the peer state over a past time range.",
+		examples: []string{"get ospf-peers --site HQ", "get ospf-peers -A --device sw-core", "get ospf-peers -A --up false", "get ospf-peers --site HQ --peer 10.0.0.6"},
 	},
 	"ports": {
 		group: "stats", title: "port",
 		short: "Switch and WAN edge ports with their live status",
 		about: `The table shows a selection of the port stats; use -o yaml (or
 ` + "`describe port`" + ` for a single port) to see all of them. Without --device
-this lists every port of the site or org, which can be a lot: add --limit.`,
+this lists every port of the site or org, which can be a lot: add --limit.
+Every filter is applied by the API; --poe false and --speed 0 are sent as
+such.`,
 		examples: []string{
 			"get ports --device sw-core",
 			"get ports --site HQ --status down",
+			"get ports --site HQ --poe true --status down",
+			"get ports -A --neighbor ap-lobby",
+			"get ports --site HQ --auth-state held -o wide",
+			"get ports --site HQ --stp-state blocking",
 			"get ports --site HQ --type gateway -o wide",
 			"get port ge-0/0/1 --device sw-core -o yaml",
 		},
