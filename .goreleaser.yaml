@@ -1,0 +1,149 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# GoReleaser configuration for mistctl.
+#
+# Signing and package publishing are opt-in: each step only runs when its
+# secrets are present, so a fork or a first release works without them.
+# See RELEASING.md for the secrets and one-time setup.
+version: 2
+
+project_name: mistctl
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+    - ./scripts/completions.sh
+
+builds:
+  - id: mistctl
+    main: ./cmd/mistctl
+    binary: mistctl
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/tmunzer-AIDE/mistctl/internal/cli.Version={{ .Version }}
+      - -X github.com/tmunzer-AIDE/mistctl/internal/cli.Commit={{ .ShortCommit }}
+      - -X github.com/tmunzer-AIDE/mistctl/internal/cli.Date={{ .Date }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      post:
+        # Authenticode-signs Windows binaries when WINDOWS_SIGN_* secrets are set.
+        - cmd: ./scripts/sign-windows.sh "{{ .Path }}" "{{ .Target }}"
+          output: true
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - completions/*
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+# macOS: sign and notarize with the Apple Developer ID certificate.
+# Runs on Linux runners too (uses quill under the hood).
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      sign:
+        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+        key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        wait: true
+        timeout: 20m
+
+nfpms:
+  - id: packages
+    package_name: mistctl
+    vendor: mistctl
+    homepage: https://github.com/tmunzer-AIDE/mistctl
+    maintainer: mistctl maintainers
+    description: Read-only, kubectl-style command line client for the Juniper Mist API.
+    license: MIT
+    formats: [deb, rpm, apk]
+    contents:
+      - src: ./completions/mistctl.bash
+        dst: /usr/share/bash-completion/completions/mistctl
+        file_info: { mode: 0644 }
+      - src: ./completions/mistctl.zsh
+        dst: /usr/share/zsh/vendor-completions/_mistctl
+        file_info: { mode: 0644 }
+      - src: ./completions/mistctl.fish
+        dst: /usr/share/fish/vendor_completions.d/mistctl.fish
+        file_info: { mode: 0644 }
+
+homebrew_casks:
+  - name: mistctl
+    repository:
+      owner: tmunzer-AIDE
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/tmunzer-AIDE/mistctl
+    description: Read-only, kubectl-style command line client for the Juniper Mist API
+    license: MIT
+    skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    completions:
+      bash: completions/mistctl.bash
+      zsh: completions/mistctl.zsh
+      fish: completions/mistctl.fish
+
+scoops:
+  - name: mistctl
+    repository:
+      owner: tmunzer-AIDE
+      name: scoop-bucket
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/tmunzer-AIDE/mistctl
+    description: Read-only, kubectl-style command line client for the Juniper Mist API
+    license: MIT
+    skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+
+winget:
+  - name: mistctl
+    publisher: tmunzer-AIDE
+    short_description: Read-only command line client for the Juniper Mist API
+    license: MIT
+    homepage: https://github.com/tmunzer-AIDE/mistctl
+    publisher_url: https://github.com/tmunzer-AIDE
+    package_identifier: tmunzer-AIDE.mistctl
+    skip_upload: '{{ if isEnvSet "WINGET_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    repository:
+      owner: tmunzer-AIDE
+      name: winget-pkgs
+      branch: "mistctl-{{ .Version }}"
+      token: "{{ .Env.WINGET_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  draft: true
+  prerelease: auto
