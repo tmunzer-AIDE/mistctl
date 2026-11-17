@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"time"
 )
 
@@ -31,7 +32,23 @@ func withCapture(ctx context.Context) (context.Context, *capture) {
 	return context.WithValue(ctx, captureKey{}, c), c
 }
 
-// guardTransport enforces GET-only access and keeps a copy of every response
+// shellPath is the only endpoint mistctl may call with a method other than
+// GET: creating a remote shell session (`mistctl attach`). Mist can restrict
+// that shell to read-only commands for Observer admins.
+var shellPath = regexp.MustCompile(`^/api/v1/sites/[0-9a-fA-F-]{36}/devices/[0-9a-fA-F-]{36}/shell$`)
+
+// allowed reports whether a request may leave mistctl.
+func allowed(method, path string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead:
+		return true
+	case http.MethodPost:
+		return shellPath.MatchString(path)
+	}
+	return false
+}
+
+// guardTransport enforces GET-only access (plus the shell allow-list) and keeps a copy of every response
 // body so mistctl can print exactly what the API returned.
 type guardTransport struct {
 	base    http.RoundTripper
@@ -40,7 +57,7 @@ type guardTransport struct {
 }
 
 func (t *guardTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+	if !allowed(req.Method, req.URL.Path) {
 		return nil, ErrNotReadOnly{req.Method, req.URL.Path}
 	}
 	start := time.Now()
