@@ -44,10 +44,10 @@ release-repos: ## Create homebrew-tap and scoop-bucket, fork winget-pkgs
 release-tokens: ## Create the two PATs in the browser and store them as secrets
 	@$(RELEASE) tokens
 
-release-secrets-macos: ## Store Apple secrets: P12= P8= KEY_ID= ISSUER_ID= [P12_PASSWORD=]
+release-secrets-macos: ## Store Apple secrets (prompts; or pass P12= P8= KEY_ID= ISSUER_ID=)
 	@P12="$(P12)" P8="$(P8)" KEY_ID="$(KEY_ID)" ISSUER_ID="$(ISSUER_ID)" $(RELEASE) secrets-macos
 
-release-secrets-windows: ## Store Windows signing secrets: PFX= [PFX_PASSWORD=]
+release-secrets-windows: ## Store Windows signing secrets (prompts; or pass PFX=)
 	@PFX="$(PFX)" $(RELEASE) secrets-windows
 
 release-setup: release-repos release-tokens release-doctor ## Repos + tokens, then show what is left

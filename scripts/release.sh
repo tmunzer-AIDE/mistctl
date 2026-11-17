@@ -75,6 +75,58 @@ set_secret_value() {
   fi
 }
 
+# Normalizes a path typed or dropped into the terminal: surrounding quotes,
+# backslash-escaped spaces, and a leading ~ (zsh does not expand ~ in
+# make VAR=~/path arguments).
+clean_path() {
+  p=$1
+  case "$p" in
+    \"*\") p=${p#\"}; p=${p%\"} ;;
+    \'*\') p=${p#\'}; p=${p%\'} ;;
+  esac
+  p=$(printf '%s' "$p" | sed 's/\\ / /g; s/[[:space:]]*$//')
+  # shellcheck disable=SC2088 # matching a literal ~ on purpose
+  case "$p" in
+    "~") p=$HOME ;;
+    "~/"*) p=$HOME/${p#"~/"} ;;
+  esac
+  printf '%s' "$p"
+}
+
+# ask_file VAR "label": uses $VAR if set, otherwise prompts until the file exists.
+ask_file() {
+  var=$1 label=$2
+  eval "val=\${$var:-}"
+  while :; do
+    if [ -z "$val" ]; then
+      printf '%s (path, or drag the file here): ' "$label"
+      read -r val
+    fi
+    val=$(clean_path "$val")
+    [ -f "$val" ] && break
+    echo "  file not found: $val" >&2
+    val=
+  done
+  eval "$var=\$val"
+}
+
+# ask_value VAR "label" [default]: uses $VAR if set, otherwise prompts.
+ask_value() {
+  var=$1 label=$2 def=${3:-}
+  eval "val=\${$var:-}"
+  while [ -z "$val" ]; do
+    if [ -n "$def" ]; then
+      printf '%s [%s]: ' "$label" "$def"
+      read -r val
+      val=${val:-$def}
+    else
+      printf '%s: ' "$label"
+      read -r val
+    fi
+  done
+  eval "$var=\$val"
+}
+
 open_url() {
   say "  $1"
   if command -v open >/dev/null 2>&1; then
@@ -159,10 +211,13 @@ cmd_tokens() {
 }
 
 cmd_secrets_macos() {
-  : "${P12:?set P12=path/to/developer_id.p12}"
-  : "${P8:?set P8=path/to/AuthKey_XXXX.p8}"
-  : "${KEY_ID:?set KEY_ID=<App Store Connect key ID>}"
-  : "${ISSUER_ID:?set ISSUER_ID=<App Store Connect issuer ID>}"
+  say "Apple signing and notarization (see RELEASING.md, section 3)."
+  ask_file P12 "Developer ID Application .p12"
+  ask_file P8 "App Store Connect API key AuthKey_XXXX.p8"
+  # The key ID is in the .p8 file name (AuthKey_<KEYID>.p8).
+  guess=$(basename "$P8" | sed -n 's/^AuthKey_\([A-Za-z0-9]*\)\.p8$/\1/p')
+  ask_value KEY_ID "App Store Connect key ID" "$guess"
+  ask_value ISSUER_ID "App Store Connect issuer ID (Users and Access, Integrations)"
   need_gh
   set_secret_file MACOS_SIGN_P12 "$P12"
   set_secret_value MACOS_SIGN_PASSWORD "${P12_PASSWORD:-}"
@@ -173,7 +228,7 @@ cmd_secrets_macos() {
 }
 
 cmd_secrets_windows() {
-  : "${PFX:?set PFX=path/to/codesign.pfx}"
+  ask_file PFX "Code-signing .pfx"
   need_gh
   set_secret_file WINDOWS_SIGN_PFX "$PFX"
   set_secret_value WINDOWS_SIGN_PASSWORD "${PFX_PASSWORD:-}"

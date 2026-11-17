@@ -20,8 +20,8 @@ upstream without a `y` at a prompt.
 make release-doctor        # what is set up, what is missing
 make release-repos         # create homebrew-tap + scoop-bucket (with README), fork winget-pkgs
 make release-tokens        # opens 2 pre-filled PAT forms, then asks you to paste each token
-make release-secrets-macos P12=developer_id.p12 P8=AuthKey_XXXX.p8 KEY_ID=XXXX ISSUER_ID=xxxxxxxx-...
-make release-secrets-windows PFX=codesign.pfx   # optional
+make release-secrets-macos   # asks for the .p12, the .p8 and the issuer ID (key ID read from the .p8 name)
+make release-secrets-windows # optional, asks for the .pfx
 
 make release VERSION=v0.1.0     # checks main is clean and in sync, tags, pushes
 make publish VERSION=v0.1.0     # after reviewing the draft release
