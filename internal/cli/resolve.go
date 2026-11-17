@@ -8,7 +8,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/tmunzer/mistapi-go/mistapi/models"
@@ -117,9 +116,9 @@ func (a *app) cache() *cache.Store {
 	if a.store != nil {
 		return a.store
 	}
-	ttl := 10 * time.Minute
-	if cfg, err := a.config(); err == nil && cfg.CacheTTL != "" {
-		if d, err := time.ParseDuration(cfg.CacheTTL); err == nil {
+	ttl := config.DefaultCacheTTL
+	if cfg, err := a.config(); err == nil {
+		if d, err := cfg.TTL(); err == nil {
 			ttl = d
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/tmunzer-AIDE/mistctl/internal/cloud"
 	"github.com/tmunzer-AIDE/mistctl/internal/config"
@@ -281,10 +282,17 @@ func newViewConfigCmd(a *app) *cobra.Command {
 				}
 				view.Contexts[n] = &cc
 			}
+			// Marshal with the file's own schema (yaml/json tags), so the
+			// output of --raw can be loaded back as a config file.
 			if a.output == "json" {
 				return output.Printer{Format: "json"}.PrintObject(a.out, mustJSON(view))
 			}
-			return output.WriteYAML(a.out, mustJSON(view))
+			b, err := yaml.Marshal(&view)
+			if err != nil {
+				return err
+			}
+			_, err = a.out.Write(b)
+			return err
 		},
 	}
 	cmd.Flags().BoolVar(&raw, "raw", false, "show tokens in clear text")

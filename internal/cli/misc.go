@@ -28,8 +28,11 @@ when a name is not found. API tokens are never written to the cache.`,
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "clear",
-		Short: "Delete all cached data (it is rebuilt on the next command that needs it)",
-		Args:  cobra.NoArgs,
+		Short: "Delete the cached indexes (they are rebuilt on the next command that needs them)",
+		Long: `Delete the index files mistctl wrote in the cache directory. Other files in
+that directory are never touched, and the home or current directory is
+refused as a cache directory.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := a.cache()
 			if err := s.Clear(); err != nil {

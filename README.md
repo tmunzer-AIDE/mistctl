@@ -136,8 +136,10 @@ preserved), plus a `site_name` field on devices and clients for convenience.
 
 Contexts live in `<user config dir>/mistctl/config.yaml` (`~/.config/mistctl` on
 Linux, `~/Library/Application Support/mistctl` on macOS, `%AppData%\mistctl`
-on Windows), written with `0600` permissions. Override the path with
-`--config` or `$MISTCTL_CONFIG`.
+on Windows), written atomically with `0600` permissions. Override the path
+with `--config` or `$MISTCTL_CONFIG`. Unknown keys, empty contexts and an
+invalid `cache-ttl` are reported as errors instead of being ignored, and
+`mistctl config view --raw` prints a file that loads back as is.
 
 ```yaml
 current-context: prod
@@ -167,6 +169,8 @@ mistctl keeps small name/ID indexes (orgs, sites, device inventory) in the user
 cache directory so it can resolve names, fill tab-completions and show site
 names without spending API budget. Indexes refresh after `cache-ttl` (default
 10 minutes) or when a name is not found. Tokens are never written to the cache.
+Override the directory with `$MISTCTL_CACHE_DIR`; `mistctl cache clear` only
+deletes the index files mistctl wrote there, never other files.
 
 ```sh
 # bash
