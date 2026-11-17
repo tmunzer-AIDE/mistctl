@@ -82,8 +82,12 @@ func (a *app) attach(ctx context.Context, name, node string) error {
 	if label == "" {
 		label = name
 	}
-	if e.Type == "ap" {
+	switch e.Type {
+	case "switch", "gateway", "":
+	case "ap":
 		return fmt.Errorf("%s is an access point: remote shell is only available on switches and gateways", label)
+	default:
+		return fmt.Errorf("%s is a %s: remote shell is only available on switches and gateways", label, e.Type)
 	}
 	if e.SiteID == "" {
 		return fmt.Errorf("device %q is not assigned to a site", label)
