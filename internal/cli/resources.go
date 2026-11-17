@@ -269,7 +269,7 @@ func devicesResource() *resource {
 		Endpoint:  "GET /api/v1/orgs/{org_id}/stats/devices, GET /api/v1/sites/{site_id}/stats/devices, GET /api/v1/sites/{site_id}/devices/{device_id}, GET /api/v1/orgs/{org_id}/inventory",
 		IndexKind: kindDevices,
 		Columns: []output.Column{
-			output.Col("NAME", "name", "hostname"),
+			output.Col("NAME", "name", "hostname", "mac"),
 			output.Col("TYPE", "type"),
 			output.Col("MODEL", "model"),
 			output.Col("MAC", "mac"),
@@ -391,16 +391,18 @@ func clientsResource() *resource {
 		Scope:    "org/site",
 		Endpoint: "GET /api/v1/sites/{site_id}/stats/clients, GET /api/v1/sites/{site_id}/stats/clients/{client_mac}, GET /api/v1/orgs/{org_id}/clients/search",
 		Columns: []output.Column{
-			output.Col("HOSTNAME", "hostname", "last_hostname"),
+			// Org search results carry lists (every hostname/IP seen in the
+			// window) plus last_* scalars; prefer the last_* value.
+			output.Col("HOSTNAME", "last_hostname", "hostname"),
 			output.Col("MAC", "mac"),
-			output.Col("IP", "ip", "last_ip"),
-			output.Col("SSID", "ssid", "last_ssid"),
+			output.Col("IP", "last_ip", "ip"),
+			output.Col("SSID", "last_ssid", "ssid"),
 			output.Col("AP", "ap_name", "ap_mac", "last_ap", "ap"),
 			output.Col("VLAN", "vlan_id", "last_vlan", "vlan"),
 			output.Col("BAND", "band"),
 			output.Col("RSSI", "rssi").AsWide(),
-			output.Col("OS", "os", "last_os").AsWide(),
-			output.Col("USERNAME", "username", "last_username").AsWide(),
+			output.Col("OS", "last_os", "os").AsWide(),
+			output.Col("USERNAME", "last_username", "username").AsWide(),
 			output.Col("SITE", "site_name", "site_id").AsWide(),
 			output.Col("UPTIME", "uptime").WithFormat(output.Duration).AsWide(),
 			output.Col("LAST-SEEN", "last_seen", "timestamp").WithFormat(output.Age).AsWide(),

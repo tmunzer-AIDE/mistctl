@@ -90,7 +90,7 @@ func (f *fakeMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if q.Get("search_after") == "" {
-			fmt.Fprintf(w, `{"results":[{"mac":"aabbccddeeff","last_hostname":"laptop","last_ssid":"Corp","site_id":"%s"}],"next":"/api/v1/orgs/%s/clients/search?limit=1000&search_after=%%5B123%%5D","total":2}`, siteHQ, orgID)
+			fmt.Fprintf(w, `{"results":[{"mac":"aabbccddeeff","hostname":["laptop","LAPTOP-OLD"],"ip":["10.0.1.5","10.0.1.9"],"last_ip":"10.0.1.5","last_hostname":"laptop","last_ssid":"Corp","site_id":"%s"}],"next":"/api/v1/orgs/%s/clients/search?limit=1000&search_after=%%5B123%%5D","total":2}`, siteHQ, orgID)
 			return
 		}
 		fmt.Fprintf(w, `{"results":[{"mac":"112233445566","last_hostname":"phone","last_ssid":"Guest","site_id":"%s"}],"total":2}`, siteLab)
@@ -241,7 +241,11 @@ func TestClients(t *testing.T) {
 	setup(t)
 	assertContains(t, run(t, "get", "clients", "--site", "HQ"), "laptop", "Corp", "10.0.1.5")
 	// org-wide search follows the search_after cursor
-	assertContains(t, run(t, "get", "clients", "-o", "wide"), "laptop", "phone", "Lab")
+	out := run(t, "get", "clients", "-o", "wide")
+	assertContains(t, out, "laptop", "phone", "Lab")
+	if strings.Contains(out, "LAPTOP-OLD") || strings.Contains(out, "10.0.1.9") {
+		t.Errorf("org search should show last_* values, not lists:\n%s", out)
+	}
 	assertContains(t, run(t, "describe", "client", "aa-bb-cc-dd-ee-ff"), "laptop", "State:", "connected", "Site:", "HQ")
 }
 
