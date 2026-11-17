@@ -15,24 +15,34 @@ func newGetCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get RESOURCE [NAME...]",
 		Short: "List resources",
-		Long: `List one type of resource as a table (or json/yaml with -o).
+		Long: `List one type of resource as a table, or as json/yaml with -o.
 
-Resources: ` + resourceList() + `
+Each resource has its own filters and help: mistctl get RESOURCE -h
 
 Scope: org-level resources use the org of the current context (or --org).
 Resources that exist at both levels (devices, clients, wlans, alarms, ...)
 use the context's site when set (or --site); pass -A to query the whole org.
-Site-level resources (maps, rrm, zones) need a site. See ` + "`mistctl api-resources`" + `.`,
+Site-level resources (maps, rrm, zones, ...) need a site.
+` + "`mistctl api-resources`" + ` shows the scope and API endpoints of each resource.
+
+NAME filters the list (name, ID or MAC address, depending on the resource).`,
 		Example: `  mistctl get orgs
   mistctl get sites -o wide
   mistctl get devices --site HQ --type switch
   mistctl get devices -A --status disconnected
   mistctl get clients --site HQ -o json
-  mistctl get device ap-lobby-01`,
+  mistctl get device ap-lobby-01
+  mistctl get wlans --site HQ
+  mistctl get alarms --group infra --severity critical --duration 7d
+  mistctl get events --device sw-core --type SW_PORT_DOWN
+  mistctl get ports --device sw-core --status down`,
 		RunE: unknownResource,
 	}
+	cmd.AddGroup(resourceGroups...)
 	for _, r := range registry {
-		cmd.AddCommand(newGetResourceCmd(a, r))
+		sub := newGetResourceCmd(a, r)
+		sub.GroupID = r.Group
+		cmd.AddCommand(sub)
 	}
 	return cmd
 }
@@ -43,20 +53,23 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 		Use:     r.Name + " [NAME...]",
 		Aliases: append([]string{r.Singular}, r.Aliases...),
 		Short:   r.Short,
+		Long:    r.getLong(),
+		Example: r.Example,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			items, err := r.List(ctx, a, o)
 			if err != nil {
 				return err
 			}
+			// Enrich first so NAME can match derived fields (device_name, ...).
+			if r.Enrich != nil && (r.EnrichAlways || a.output == "wide" || a.output == "json" || a.output == "yaml") {
+				items = r.Enrich(ctx, a, items)
+			}
 			if len(args) > 0 {
 				items = filterItems(items, args, r.MatchKeys)
 				if len(items) == 0 {
 					return fmt.Errorf("%s %s not found", r.Singular, strings.Join(args, ", "))
 				}
-			}
-			if r.Enrich != nil && (r.EnrichAlways || a.output == "wide" || a.output == "json" || a.output == "yaml") {
-				items = r.Enrich(ctx, a, items)
 			}
 			cols := r.Columns
 			if r.ColumnsFor != nil {

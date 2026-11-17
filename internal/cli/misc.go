@@ -28,7 +28,7 @@ when a name is not found. API tokens are never written to the cache.`,
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "clear",
-		Short: "Delete all cached data",
+		Short: "Delete all cached data (it is rebuilt on the next command that needs it)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s := a.cache()
@@ -53,7 +53,18 @@ func newAPIResourcesCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "api-resources",
 		Short: "List the resource types mistctl supports",
-		Args:  cobra.NoArgs,
+		Long: `List every resource type that ` + "`get`" + ` and ` + "`describe`" + ` accept, with its short
+names and its scope:
+
+  self      read from the token, no org needed
+  org       read at org level (--site is ignored)
+  site      needs a site (--site or the context's default site)
+  org/site  read from the site when one is set, else from the whole org
+
+With -o wide, also shows the Mist API endpoints each resource reads.`,
+		Example: `  mistctl api-resources
+  mistctl api-resources -o wide`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tw := tabwriter.NewWriter(a.out, 0, 0, 3, ' ', 0)
 			if !a.noHeaders {

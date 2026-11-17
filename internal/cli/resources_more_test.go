@@ -382,3 +382,24 @@ func TestNewResourcesAreGetOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestHelpTexts(t *testing.T) {
+	setupMore(t)
+	for _, r := range registry {
+		if r.Group == "" || r.Title == "" || r.Example == "" {
+			t.Errorf("%s: missing help (group, title or examples) in help.go", r.Name)
+		}
+		out := run(t, "get", r.Name, "-h")
+		assertContains(t, out, "Scope:", "Examples:", "mistctl get ")
+		if r.Describe != nil {
+			out = run(t, "describe", r.Singular, "-h")
+			assertContains(t, out, "Show the details of one "+r.Title, "Scope:", "Examples:")
+		}
+	}
+	out := run(t, "get", "-h")
+	assertContains(t, out, "Inventory:", "Configuration:", "Monitoring:", "Live stats:")
+	assertNotContains(t, run(t, "describe", "-h"), "Monitoring:", "Describe a ")
+	assertContains(t, run(t, "describe", "port", "-h"), "[DEVICE:]PORT")
+	// NAME can match derived fields such as the device name
+	assertContains(t, run(t, "get", "ports", "sw-core", "--site", "HQ"), "ge-0/0/1", "ge-0/0/2")
+}

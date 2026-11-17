@@ -17,7 +17,8 @@ func newUsageCmd(a *app) *cobra.Command {
 		Aliases: []string{"ratelimit", "rate-limit"},
 		Short:   "Show the remaining API budget of the current token",
 		Long: `Show how many API calls the current token has made in the current hourly
-rate-limit window, how many remain, and when the window resets.`,
+rate-limit window, how many remain, and when the window resets. Mist allows
+5000 API calls per hour and per token; this command itself uses one.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cl, err := a.client()

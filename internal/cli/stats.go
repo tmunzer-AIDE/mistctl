@@ -343,7 +343,7 @@ func portsResource() *resource {
 			fs.StringVar(&o.device, "device", "", "device the port belongs to (name, ID or MAC); instead of the DEVICE: prefix")
 		},
 		DescribeArg: "[DEVICE:]PORT",
-		DescribeLong: `Show a summary and every stat of one switch or gateway port.
+		DescribeLong: `Prints every stat of one switch or WAN edge port.
 
 The port is identified by its device and its port ID, given either as one
 DEVICE:PORT argument or as PORT plus --device. DEVICE can be a device name,

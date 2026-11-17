@@ -73,7 +73,10 @@ Get started:
   echo "$TOKEN" | mistctl config set-context prod --cloud global01 --token-stdin --org <ORG>
   mistctl whoami
   mistctl get sites
-  mistctl get devices --site HQ -o wide`,
+  mistctl get devices --site HQ -o wide
+
+` + "`mistctl get -h`" + ` lists the resources; every resource has its own help
+(` + "`mistctl get devices -h`" + `, ` + "`mistctl describe port -h`" + `).`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -91,10 +94,10 @@ Get started:
 	pf.StringVar(&a.org, "org", "", "org name or ID (overrides the context)")
 	pf.StringVar(&a.site, "site", "", "site name or ID (overrides the context)")
 	pf.BoolVarP(&a.allSites, "all-sites", "A", false, "ignore the context's default site and query the whole org")
-	pf.StringVarP(&a.output, "output", "o", "table", "output format: table, wide, json, yaml, name")
+	pf.StringVarP(&a.output, "output", "o", "table", "output format: table, wide (more columns), json, yaml (raw API objects), name (names only)")
 	pf.BoolVar(&a.noHeaders, "no-headers", false, "do not print table headers")
 	pf.BoolVar(&a.noCache, "no-cache", false, "bypass the local name/ID cache")
-	pf.BoolVarP(&a.debug, "verbose", "v", false, "print every HTTP request to stderr")
+	pf.BoolVarP(&a.debug, "verbose", "v", false, "print every API request (URL, status, duration) to stderr")
 
 	_ = root.RegisterFlagCompletionFunc("output", fixedCompletion(output.Formats...))
 	_ = root.RegisterFlagCompletionFunc("context", a.completeContexts)

@@ -66,6 +66,13 @@ type resource struct {
 	DefaultLimit int
 	// FlagValues lists the accepted values of enum flags, for completion.
 	FlagValues map[string][]string
+	// Group, Title, About and Example are help texts, set from help.go.
+	Group   string
+	Title   string
+	About   string
+	Example string
+	// DescribeOrgWide: describe ignores the site (documented in its help).
+	DescribeOrgWide bool
 	// DescribeArg, DescribeLong and DescribeExample customize the help of
 	// `describe RESOURCE` (defaults: NAME, none, none).
 	DescribeArg     string
@@ -117,6 +124,7 @@ func init() {
 		// stats
 		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(),
 	}
+	applyResourceHelp()
 }
 
 // ---- orgs -----------------------------------------------------------------
