@@ -97,7 +97,9 @@ homebrew_casks:
     homepage: https://github.com/tmunzer-AIDE/mistctl
     description: Read-only, kubectl-style command line client for the Juniper Mist API
     license: MIT
-    skip_upload: '{{ if isEnvSet "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    # Homebrew disables casks that fail Gatekeeper, so only publish the cask
+    # when the macOS binaries are signed and notarized.
+    skip_upload: '{{ if and (isEnvSet "TAP_GITHUB_TOKEN") (isEnvSet "MACOS_SIGN_P12") }}false{{ else }}true{{ end }}'
     completions:
       bash: completions/mistctl.bash
       zsh: completions/mistctl.zsh
@@ -128,8 +130,11 @@ winget:
       name: winget-pkgs
       branch: "mistctl-{{ .Version }}"
       token: "{{ .Env.WINGET_GITHUB_TOKEN }}"
+      # Releases are drafts, so their download URLs only work once published.
+      # GoReleaser pushes the manifest branch to the fork; open the PR to
+      # microsoft/winget-pkgs by hand after publishing (see RELEASING.md).
       pull_request:
-        enabled: true
+        enabled: false
         base:
           owner: microsoft
           name: winget-pkgs
