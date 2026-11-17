@@ -13,10 +13,28 @@ sw-core    switch   EX4100   5c5b35000002   -           disconnected   -        
 
 ## Read-only by design
 
-mistctl only ever sends `GET` requests. Every request goes through a transport
-that refuses any other HTTP method before it leaves your machine. For defence
-in depth, use an API token with the **read (Observer)** role; `mistctl whoami`
-warns when the token has more than that.
+mistctl only sends `GET` requests. Every request goes through a transport
+that refuses any other HTTP method before it leaves your machine. The single,
+allow-listed exception is `POST /api/v1/sites/{site_id}/devices/{device_id}/shell`,
+used by `mistctl attach` to open a remote shell. For defence in depth, use an
+API token with the **read (Observer)** role; `mistctl whoami` warns when the
+token has more than that.
+
+## Remote shell (`attach`)
+
+```
+mistctl attach sw-core              # name, ID or MAC
+mistctl attach srx-hq --node node1  # one member of an SRX HA cluster
+```
+
+`attach` opens an interactive Junos shell on a switch or gateway through the
+Mist cloud, like `kubectl attach`. The terminal runs in raw mode (Ctrl+C goes
+to the device); type `exit` on the device, or `~.` at the start of a line, to
+quit. Works on Linux, macOS and Windows terminals.
+
+Mist can give read-only (Observer) admins a **read-only** remote shell when the
+org setting allows it. With a token that has write privileges the shell is
+**read-write**, and `attach` prints a loud warning before connecting.
 
 ## Install
 
@@ -65,6 +83,7 @@ mistctl get rrm --site HQ --band 5
 | --- | --- |
 | `get RESOURCE [NAME...]` | List resources as a table, or `-o wide/json/yaml/name` |
 | `describe RESOURCE NAME` | Summary plus full config and status of one object |
+| `attach DEVICE` | Interactive remote shell on a switch or gateway |
 | `whoami` | Identity, cloud and privileges of the current token |
 | `usage` (alias `ratelimit`) | API calls used / remaining in the current hourly window |
 | `config ...` | `set-context`, `use-context`, `get-contexts`, `current-context`, `delete-context`, `view`, `clouds` |
@@ -167,7 +186,6 @@ Release packages install completions automatically.
 - `mistctl api <path...>`: path-style access to every GET endpoint of the Mist
   OpenAPI spec, with completion from the spec and the cache.
 - More curated resources (NAC clients, site-level templates, ...).
-- `mistctl attach <device>`: read-only remote shell for Observer users.
 
 ## Development
 

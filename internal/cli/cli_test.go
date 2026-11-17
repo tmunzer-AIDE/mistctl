@@ -121,6 +121,10 @@ func (f *fakeMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			fmt.Fprint(w, `{"results":[],"total":0}`)
 		}
+	case p == "/api/v1/sites/"+siteHQ+"/devices/"+swID+"/shell" && r.Method == "POST":
+		fmt.Fprint(w, `{"session":"s1","url":"wss://api-ws.mist.com/ssh/s1"}`)
+	case p == "/ssh/s1":
+		fakeShell(w, r)
 	default:
 		w.WriteHeader(404)
 		fmt.Fprintf(w, `{"detail":"no route %s"}`, p)

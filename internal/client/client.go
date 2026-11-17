@@ -30,6 +30,8 @@ type Client struct {
 	Debug bool
 	// Calls counts HTTP requests sent during this invocation.
 	Calls int
+
+	token string
 }
 
 // New builds a client for the given cloud and token.
@@ -39,7 +41,7 @@ func New(c cloud.Cloud, token string, debug bool) (*Client, error) {
 		return nil, errors.New("no API token configured (use `mistctl config set-context --token` or $MIST_APITOKEN)")
 	}
 	token = strings.TrimPrefix(token, "Token ")
-	cl := &Client{Cloud: c, Debug: debug}
+	cl := &Client{Cloud: c, Debug: debug, token: token}
 	tr := &guardTransport{base: BaseTransport, debug: debug, counter: &cl.Calls}
 	cfg := mistapi.CreateConfigurationFromEnvironment(
 		mistapi.WithEnvironment(c.Env),

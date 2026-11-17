@@ -66,7 +66,8 @@ func newRootCmd(out, errw io.Writer) *cobra.Command {
 		Short: "Read-only command line client for the Juniper Mist API",
 		Long: `mistctl is a read-only, kubectl-style command line client for the Juniper Mist API.
 
-It only ever sends GET requests. For defence in depth, use an API token with a
+It only sends GET requests (the single exception is creating a remote shell
+session with "mistctl attach"). For defence in depth, use an API token with a
 read-only (Observer) role.
 
 Get started:
@@ -107,6 +108,7 @@ Get started:
 	root.AddCommand(
 		newGetCmd(a),
 		newDescribeCmd(a),
+		newAttachCmd(a),
 		newWhoamiCmd(a),
 		newUsageCmd(a),
 		newConfigCmd(a),
