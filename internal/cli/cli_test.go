@@ -94,6 +94,12 @@ func (f *fakeMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fmt.Fprintf(w, `{"results":[{"mac":"112233445566","last_hostname":"phone","last_ssid":"Guest","site_id":"%s"}],"total":2}`, siteLab)
+	case p == "/api/v1/orgs/"+orgID+"/wired_clients/search", p == "/api/v1/sites/"+siteHQ+"/wired_clients/search":
+		if q.Get("duration") != "1d" && q.Get("mac") == "" {
+			http.Error(w, `{"detail":"expected duration=1d"}`, 400)
+			return
+		}
+		fmt.Fprintf(w, `{"results":[{"mac":"001122334455","dhcp_hostname":"printer","ip":["10.0.2.7"],"device_mac":["5c5b35000002"],"port_id":["ge-0/0/5"],"vlan":[20],"site_id":"%s","auth_state":"authenticated","timestamp":1794887387.5}],"total":1}`, siteHQ)
 	default:
 		w.WriteHeader(404)
 		fmt.Fprintf(w, `{"detail":"no route %s"}`, p)
@@ -327,4 +333,12 @@ func TestConfigCommands(t *testing.T) {
 	if _, err := runErr("config", "current-context"); err == nil {
 		t.Error("expected no current context")
 	}
+}
+
+func TestWiredClients(t *testing.T) {
+	setup(t)
+	out := run(t, "get", "wired-clients")
+	assertContains(t, out, "printer", "001122334455", "10.0.2.7", "sw-core", "ge-0/0/5", "20")
+	assertContains(t, run(t, "get", "wired", "--site", "HQ", "-o", "wide"), "printer", "authenticated", "HQ")
+	assertContains(t, run(t, "describe", "wired-client", "00:11:22:33:44:55"), "Hostname:", "printer", "Device:", "sw-core", "Port:", "ge-0/0/5")
 }

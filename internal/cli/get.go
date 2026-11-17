@@ -54,7 +54,7 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 					return fmt.Errorf("%s %s not found", r.Singular, strings.Join(args, ", "))
 				}
 			}
-			if r.Enrich != nil && (a.output == "wide" || a.output == "json" || a.output == "yaml") {
+			if r.Enrich != nil && (r.EnrichAlways || a.output == "wide" || a.output == "json" || a.output == "yaml") {
 				items = r.Enrich(ctx, a, items)
 			}
 			if a.output == "table" || a.output == "wide" {

@@ -48,6 +48,7 @@ mistctl get sites -o wide
 mistctl get devices --site HQ --type switch
 mistctl get devices -A --status disconnected
 mistctl get clients --site HQ
+mistctl get wired-clients --site HQ
 mistctl describe device ap-lobby
 mistctl describe client aa:bb:cc:dd:ee:ff -o json
 ```
@@ -72,7 +73,8 @@ mistctl describe client aa:bb:cc:dd:ee:ff -o json
 | `orgs` | `org` | token | `/self`, `/orgs/{id}`, `/orgs/{id}/stats` |
 | `sites` | `site` | org | `/orgs/{id}/sites`, `/sites/{id}`, `/sites/{id}/stats` |
 | `devices` | `device`, `dev` | org or site | `/orgs/{id}/stats/devices`, `/sites/{id}/stats/devices`, `/sites/{id}/devices/{id}` |
-| `clients` | `client`, `wc` | org or site | `/sites/{id}/stats/clients` (connected now), `/orgs/{id}/clients/search` (recent, `--duration`) |
+| `clients` | `client`, `wc` | org or site | Wireless: `/sites/{id}/stats/clients` (connected now), `/orgs/{id}/clients/search` (recent, `--duration`) |
+| `wired-clients` | `wired-client`, `wired` | org or site | `/orgs/{id}/wired_clients/search`, `/sites/{id}/wired_clients/search` (`--duration`, default 1d) |
 
 Objects can be referred to by name, ID, or (devices and clients) MAC address in
 any format (`5c5b35000001`, `5C:5B:35:00:00:01`, `5c-5b-...`).

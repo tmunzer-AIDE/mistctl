@@ -39,6 +39,9 @@ type resource struct {
 	Describe  func(ctx context.Context, a *app, name string) (*described, error)
 	// Enrich adds derived fields (e.g. site_name) before printing.
 	Enrich func(ctx context.Context, a *app, items []json.RawMessage) []json.RawMessage
+	// EnrichAlways runs Enrich for the default table too (when a default
+	// column depends on it).
+	EnrichAlways bool
 }
 
 // described is the result of `describe`.
@@ -70,7 +73,7 @@ func findResource(name string) (*resource, error) {
 }
 
 func init() {
-	registry = []*resource{orgsResource(), sitesResource(), devicesResource(), clientsResource()}
+	registry = []*resource{orgsResource(), sitesResource(), devicesResource(), clientsResource(), wiredClientsResource()}
 }
 
 // ---- orgs -----------------------------------------------------------------
@@ -387,7 +390,7 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 func clientsResource() *resource {
 	return &resource{
 		Name: "clients", Singular: "client", Aliases: []string{"wireless-clients", "wc"},
-		Short:    "Wireless clients (connected now with --site, recent across the org otherwise)",
+		Short:    "Wireless clients (connected now with --site, recent across the org otherwise); see wired-clients for wired",
 		Scope:    "org/site",
 		Endpoint: "GET /api/v1/sites/{site_id}/stats/clients, GET /api/v1/sites/{site_id}/stats/clients/{client_mac}, GET /api/v1/orgs/{org_id}/clients/search",
 		Columns: []output.Column{
@@ -538,6 +541,143 @@ func describeClient(ctx context.Context, a *app, name string) (*described, error
 		},
 		Doc: combine("stats", bodyOrNil(stats, serr), "last_seen", last),
 	}, nil
+}
+
+// ---- wired clients --------------------------------------------------------
+
+func wiredClientsResource() *resource {
+	return &resource{
+		Name: "wired-clients", Singular: "wired-client", Aliases: []string{"wired", "wcl"},
+		Short:    "Wired clients seen on switch and gateway ports (search over --duration)",
+		Scope:    "org/site",
+		Endpoint: "GET /api/v1/orgs/{org_id}/wired_clients/search, GET /api/v1/sites/{site_id}/wired_clients/search",
+		Columns: []output.Column{
+			output.Col("HOSTNAME", "dhcp_hostname", "dhcp_fqdn"),
+			output.Col("MAC", "mac"),
+			output.Col("IP", "ip"),
+			output.Col("DEVICE", "device_name", "device_mac"),
+			output.Col("PORT", "port_id"),
+			output.Col("VLAN", "vlan"),
+			output.Col("AUTH", "auth_state").AsWide(),
+			output.Col("VENDOR", "manufacture", "dhcp_vendor_class_identifier").AsWide(),
+			output.Col("SITE", "site_name", "site_id").AsWide(),
+			output.Col("LAST-SEEN", "timestamp").WithFormat(output.Age).AsWide(),
+		},
+		Flags: func(fs *pflag.FlagSet, o *listOpts) {
+			fs.StringVar(&o.duration, "duration", "1d", "search window (e.g. 1h, 1d, 7d)")
+		},
+		List: func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+			cl, err := a.client()
+			if err != nil {
+				return nil, err
+			}
+			site, hasSite, err := a.siteID(ctx)
+			if err != nil {
+				return nil, err
+			}
+			dur := client.Ptr(o.duration)
+			if hasSite {
+				return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+					return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
+						return cl.SDK.SitesClientsWired().SearchSiteWiredClients(ctx, site, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, nil, nil, dur, nil, after)
+					})
+				})
+			}
+			org, err := a.orgID(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
+					return cl.SDK.OrgsClientsWired().SearchOrgWiredClients(ctx, org, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, nil, nil, dur, nil, after)
+				})
+			})
+		},
+		EnrichAlways: true,
+		Enrich: func(ctx context.Context, a *app, items []json.RawMessage) []json.RawMessage {
+			return addDeviceNames(ctx, a, addSiteNames(ctx, a, items))
+		},
+		Describe: func(ctx context.Context, a *app, name string) (*described, error) {
+			if !cache.IsMAC(name) {
+				return nil, fmt.Errorf("wired clients are identified by MAC address, got %q", name)
+			}
+			mac := cache.NormalizeMAC(name)
+			cl, err := a.client()
+			if err != nil {
+				return nil, err
+			}
+			org, err := a.orgID(ctx)
+			if err != nil {
+				return nil, err
+			}
+			limit, dur := 1, "7d"
+			r, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
+				return cl.SDK.OrgsClientsWired().SearchOrgWiredClients(ctx, org, nil, nil, nil, nil, nil, &mac, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, nil, nil, &dur, nil, nil)
+			})
+			if err != nil {
+				return nil, err
+			}
+			var res struct {
+				Results []json.RawMessage `json:"results"`
+			}
+			_ = json.Unmarshal(r.Body, &res)
+			if len(res.Results) == 0 {
+				return nil, fmt.Errorf("wired client %s not seen in the last 7 days", name)
+			}
+			items := addDeviceNames(ctx, a, addSiteNames(ctx, a, res.Results[:1]))
+			m := output.Decode(items[0])
+			return &described{
+				Header: [][2]string{
+					{"Hostname", output.Text(m["dhcp_hostname"])},
+					{"MAC", mac},
+					{"IP", output.Text(m["ip"])},
+					{"Site", siteLabel(a.siteNames(ctx), output.Text(m["site_id"]))},
+					{"Device", output.Text(m["device_name"])},
+					{"Device MAC", output.Text(m["device_mac"])},
+					{"Port", output.Text(m["port_id"])},
+					{"VLAN", output.Text(m["vlan"])},
+					{"Auth", strings.TrimSpace(output.Text(m["auth_state"]) + " " + output.Text(m["auth_method"]))},
+					{"Last seen", ageOf(m["timestamp"])},
+				},
+				Doc: res.Results[0],
+			}, nil
+		},
+	}
+}
+
+// addDeviceNames adds "device_name" for the switch/gateway MACs in
+// device_mac, using the cached device inventory.
+func addDeviceNames(ctx context.Context, a *app, items []json.RawMessage) []json.RawMessage {
+	entries, err := a.index(ctx, kindDevices, true)
+	if err != nil || len(entries) == 0 {
+		return items
+	}
+	byMAC := map[string]string{}
+	for _, e := range entries {
+		if e.MAC != "" && e.Name != "" {
+			byMAC[e.MAC] = e.Name
+		}
+	}
+	for i, it := range items {
+		m := output.Decode(it)
+		if _, exists := m["device_name"]; exists {
+			continue
+		}
+		var names []string
+		macs, _ := m["device_mac"].([]any)
+		for _, v := range macs {
+			mac := cache.NormalizeMAC(output.Text(v))
+			if n := byMAC[mac]; n != "" {
+				names = append(names, n)
+			} else {
+				names = append(names, mac)
+			}
+		}
+		if len(names) > 0 {
+			items[i] = appendField(it, "device_name", strings.Join(names, ","))
+		}
+	}
+	return items
 }
 
 // ---- helpers --------------------------------------------------------------
