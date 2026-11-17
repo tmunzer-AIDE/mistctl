@@ -18,8 +18,11 @@ func newWhoamiCmd(a *app) *cobra.Command {
 		Long: `Show who the current API token belongs to, which cloud and context are in
 use, and the orgs and sites the token can access with its role in each.
 
-mistctl warns when the token can do more than read: mistctl itself only sends
-GET requests, but a read-only (Observer) token is the safer choice.
+mistctl warns when the token can do more than read. mistctl's API commands
+only send GET requests, but "mistctl attach" opens an interactive remote shell
+whose commands the HTTP guard cannot restrict: with a token that can write,
+that shell can change the device. A read-only (Observer) token is the safer
+choice.
 
 With -o json or -o yaml, prints the raw answer of GET /api/v1/self.`,
 		Example: `  mistctl whoami
@@ -85,13 +88,13 @@ With -o json or -o yaml, prints the raw answer of GET /api/v1/self.`,
 				if scope == "org" {
 					org = output.Text(p["name"])
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", scope, orDash(output.Text(p["name"])), orDash(org), role, orDash(id))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", output.Safe(scope), output.Safe(orDash(output.Text(p["name"]))), output.Safe(orDash(org)), output.Safe(role), output.Safe(orDash(id)))
 			}
 			if err := tw.Flush(); err != nil {
 				return err
 			}
 			if writable {
-				fmt.Fprintln(a.err, "\nNote: this token has privileges beyond read-only. mistctl only sends GET requests, but a token with the read (Observer) role is recommended.")
+				fmt.Fprintln(a.err, "\nNote: this token has privileges beyond read-only. mistctl's API commands only send GET requests, but `mistctl attach` would open a read-write shell; a token with the read (Observer) role is recommended.")
 			}
 			return nil
 		},

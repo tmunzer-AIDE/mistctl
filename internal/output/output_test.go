@@ -57,3 +57,37 @@ func TestHumanDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestTerminalControlsAreEscaped(t *testing.T) {
+	item := json.RawMessage(`{"name":"ap\u001b[2J\u001b]0;pwned\u0007","note":"a\tb\nc\u009b31m\u202egnp.exe"}`)
+	cols := []Column{Col("NAME", "name"), Col("NOTE", "note")}
+	for _, f := range []string{"table", "wide", "name"} {
+		var b bytes.Buffer
+		if err := (Printer{Format: f}).PrintList(&b, []json.RawMessage{item}, cols); err != nil {
+			t.Fatal(err)
+		}
+		out := b.String()
+		for _, bad := range []string{"\x1b", "\x07", "\u009b", "\u202e"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("%s output contains control %q: %q", f, bad, out)
+			}
+		}
+		if !strings.Contains(out, `ap\x1b[2J`) {
+			t.Errorf("%s output should show the escape visibly: %q", f, out)
+		}
+	}
+	var b bytes.Buffer
+	KV(&b, [][2]string{{"Name", "x\x1b[2Jy"}})
+	if strings.Contains(b.String(), "\x1b") {
+		t.Errorf("KV output contains ESC: %q", b.String())
+	}
+	// Structured output keeps the data (JSON escapes it itself).
+	b.Reset()
+	_ = (Printer{Format: "json"}).PrintList(&b, []json.RawMessage{item}, cols)
+	if !strings.Contains(b.String(), `\u001b[2J`) {
+		t.Errorf("json changed the data: %s", b.String())
+	}
+	if Safe("café ✓") != "café ✓" {
+		t.Error("printable unicode must be kept")
+	}
+}

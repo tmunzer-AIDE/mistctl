@@ -17,6 +17,7 @@ import (
 	"github.com/tmunzer/mistapi-go/mistapi/models"
 
 	"github.com/tmunzer-AIDE/mistctl/internal/cloud"
+	"github.com/tmunzer-AIDE/mistctl/internal/output"
 )
 
 // BaseTransport is the underlying HTTP transport. Tests replace it to point
@@ -118,7 +119,13 @@ func Call[T any](ctx context.Context, c *Client, fn func(context.Context) (model
 	return Raw{Status: capt.status, Header: capt.header, Body: body}, nil
 }
 
+// errorMessage extracts a readable message from an error body. It ends up on
+// the terminal, so control characters are escaped.
 func errorMessage(b []byte) string {
+	return output.Safe(rawErrorMessage(b))
+}
+
+func rawErrorMessage(b []byte) string {
 	var m map[string]any
 	if json.Unmarshal(b, &m) == nil {
 		for _, k := range []string{"detail", "message", "error", "reason"} {

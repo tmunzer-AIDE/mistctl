@@ -72,9 +72,10 @@ func newRootCmd(out, errw io.Writer) *cobra.Command {
 		Short: "Read-only command line client for the Juniper Mist API",
 		Long: `mistctl is a read-only, kubectl-style command line client for the Juniper Mist API.
 
-It only sends GET requests (the single exception is creating a remote shell
-session with "mistctl attach"). For defence in depth, use an API token with a
-read-only (Observer) role.
+Its API commands only send GET requests. The one exception is "mistctl
+attach", which creates an interactive remote shell: what you type there is
+not restricted by mistctl, so use an API token with the read-only (Observer)
+role for a read-only shell and for defence in depth.
 
 Get started:
   echo "$TOKEN" | mistctl config set-context prod --cloud global01 --token-stdin --org <ORG>

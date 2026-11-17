@@ -187,7 +187,7 @@ it is read from). The current context is marked with *.`,
 				if n == cfg.CurrentContext {
 					cur = "*"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", cur, n, c.Cloud, orDash(c.Org), orDash(c.Site), tokenSource(c))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", cur, output.Safe(n), output.Safe(c.Cloud), output.Safe(orDash(c.Org)), output.Safe(orDash(c.Site)), output.Safe(tokenSource(c)))
 			}
 			return tw.Flush()
 		},

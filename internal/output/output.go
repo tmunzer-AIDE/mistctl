@@ -197,7 +197,7 @@ func (p Printer) PrintList(w io.Writer, items []json.RawMessage, cols []Column) 
 		return WriteYAML(w, b)
 	case "name":
 		for _, it := range items {
-			fmt.Fprintln(w, p.name(Decode(it)))
+			fmt.Fprintln(w, Safe(p.name(Decode(it))))
 		}
 		return nil
 	}
@@ -224,7 +224,7 @@ func (p Printer) PrintList(w io.Writer, items []json.RawMessage, cols []Column) 
 			if v == "" {
 				v = "-"
 			}
-			row[i] = strings.ReplaceAll(v, "\t", " ")
+			row[i] = Safe(v)
 		}
 		fmt.Fprintln(tw, strings.Join(row, "\t"))
 	}
@@ -298,7 +298,7 @@ func KV(w io.Writer, pairs [][2]string) {
 		if kv[1] == "" {
 			continue
 		}
-		fmt.Fprintf(tw, "%s:\t%s\n", kv[0], kv[1])
+		fmt.Fprintf(tw, "%s:\t%s\n", Safe(kv[0]), Safe(kv[1]))
 	}
 	tw.Flush()
 }
@@ -319,4 +319,51 @@ func SortBy(items []json.RawMessage, c Column) {
 		sorted[i] = items[j]
 	}
 	copy(items, sorted)
+}
+
+// Safe makes a value safe to print on a terminal: control characters (C0,
+// DEL, C1, which include ESC and CSI), line and paragraph separators and
+// bidirectional overrides are shown as \xNN / \uNNNN escapes, and a tab
+// becomes a space so it cannot break table alignment. Use it for every value
+// that came from the API in human-readable output; JSON and YAML have their
+// own escaping and keep the data as is.
+func Safe(s string) string {
+	clean := true
+	for _, r := range s {
+		if unsafeRune(r) {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\t':
+			b.WriteByte(' ')
+		case !unsafeRune(r):
+			b.WriteRune(r)
+		case r < 0x100:
+			fmt.Fprintf(&b, "\\x%02x", r)
+		default:
+			fmt.Fprintf(&b, "\\u%04x", r)
+		}
+	}
+	return b.String()
+}
+
+func unsafeRune(r rune) bool {
+	switch {
+	case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+		return true
+	case r == 0x2028, r == 0x2029: // line / paragraph separator
+		return true
+	case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069: // bidi overrides
+		return true
+	case r == 0xfffd: // invalid UTF-8 is decoded as U+FFFD: keep it, it is inert
+		return false
+	}
+	return false
 }

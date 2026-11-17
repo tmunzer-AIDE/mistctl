@@ -13,12 +13,19 @@ sw-core    switch   EX4100   5c5b35000002   -           disconnected   -        
 
 ## Read-only by design
 
-mistctl only sends `GET` requests. Every request goes through a transport
+mistctl is read-oriented: its API commands only send `GET` requests, plus an
+interactive remote shell (`attach`). Every request goes through a transport
 that refuses any other HTTP method before it leaves your machine. The single,
 allow-listed exception is `POST /api/v1/sites/{site_id}/devices/{device_id}/shell`,
-used by `mistctl attach` to open a remote shell. For defence in depth, use an
-API token with the **read (Observer)** role; `mistctl whoami` warns when the
-token has more than that.
+used by `mistctl attach` to open a remote shell. The HTTP guard cannot restrict
+what is typed inside that shell: with a token that can write, the shell can
+change the device. Use an API token with the **read (Observer)** role;
+`mistctl whoami` and `mistctl attach` warn when the token has more than that.
+
+The shell websocket must be `wss://` on the selected cloud's API or `api-ws`
+host; anything else (cleartext, another host or port, a redirect) is refused
+and the token is never sent to it. Table, name and describe output escape
+terminal control characters coming from the API; JSON and YAML keep the data.
 
 ## Remote shell (`attach`)
 
