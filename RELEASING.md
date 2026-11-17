@@ -9,6 +9,34 @@ are set in the repository (Settings, Secrets and variables, Actions, New
 repository secret). A release without any secret still produces unsigned
 archives, Linux packages and checksums on the draft release.
 
+## Quick path with `make`
+
+The Makefile wraps every step below with the GitHub CLI (`brew install gh`,
+then `gh auth login` as `tmunzer-AIDE`). Each target is safe to re-run: it
+skips what already exists, and nothing is tagged, published or opened
+upstream without a `y` at a prompt.
+
+```sh
+make release-doctor        # what is set up, what is missing
+make release-repos         # create homebrew-tap + scoop-bucket (with README), fork winget-pkgs
+make release-tokens        # opens 2 pre-filled PAT forms, then asks you to paste each token
+make release-secrets-macos P12=developer_id.p12 P8=AuthKey_XXXX.p8 KEY_ID=XXXX ISSUER_ID=xxxxxxxx-...
+make release-secrets-windows PFX=codesign.pfx   # optional
+
+make release VERSION=v0.1.0     # checks main is clean and in sync, tags, pushes
+make publish VERSION=v0.1.0     # after reviewing the draft release
+make winget-pr VERSION=v0.1.0   # opens the PR to microsoft/winget-pkgs
+```
+
+Passwords are asked at a hidden prompt (pass `P12_PASSWORD=` or
+`PFX_PASSWORD=` only if you accept them landing in your shell history). Files
+are base64-encoded and piped straight to `gh secret set`; nothing is written
+to disk. The PAT forms cannot pre-select repositories: pick "Only select
+repositories" and the repositories named in the terminal.
+
+The certificate, the App Store Connect API key and the PATs themselves still
+have to be created by hand, as described below.
+
 ## One-time setup
 
 ### 1. Package repositories
@@ -139,8 +167,8 @@ Then:
 ## Local dry run
 
 ```sh
-goreleaser check
-goreleaser release --snapshot --clean --skip=sign,notarize,sbom
+make check      # goreleaser check
+make snapshot   # goreleaser release --snapshot --clean --skip=sign,notarize,sbom
 ```
 
 Output lands in `dist/`, including the generated cask (`dist/homebrew`),
