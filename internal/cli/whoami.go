@@ -47,6 +47,10 @@ With -o json or -o yaml, prints the raw answer of GET /api/v1/self.`,
 			if fn := strings.TrimSpace(deref(adm.FirstName) + " " + deref(adm.LastName)); fn != "" && kind == "user" {
 				who = fmt.Sprintf("%s <%s>", fn, who)
 			}
+			defaultSite := t.Site
+			if t.siteInherited && t.orgOverridden {
+				defaultSite += " (ignored when it is not in the selected org)"
+			}
 			ctxName := t.Name
 			if ctxName == "" {
 				ctxName = "(environment)"
@@ -57,7 +61,7 @@ With -o json or -o yaml, prints the raw answer of GET /api/v1/self.`,
 				{"Identity", who},
 				{"Type", kind},
 				{"Default org", t.Org},
-				{"Default site", t.Site},
+				{"Default site", defaultSite},
 			})
 			fmt.Fprintln(a.out)
 			var self struct {

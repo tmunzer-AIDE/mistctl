@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/tmunzer-AIDE/mistctl/internal/cache"
@@ -54,6 +55,11 @@ type target struct {
 	Token string
 	Org   string // as configured (name or id)
 	Site  string // as configured (name or id)
+
+	siteInherited bool      // Site comes from the context, not --site
+	siteOrg       string    // the context's org, which an inherited Site belongs to
+	orgOverridden bool      // $MIST_ORG_ID or --org changed the context's org
+	siteResolved  uuid.UUID // Site once validated against the org
 }
 
 // NewRootCmd builds the command tree.

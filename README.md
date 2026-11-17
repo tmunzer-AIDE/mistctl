@@ -157,7 +157,12 @@ contexts:
 
 Environment variables override the context and match the other Mist tools:
 `MIST_APITOKEN`, `MIST_HOST` (e.g. `api.eu.mist.com`), `MIST_ORG_ID`, plus
-`MISTCTL_CONTEXT`.
+`MISTCTL_CONTEXT`. Precedence is flags, then environment, then context.
+
+The context's default site belongs to the context's org: when `MIST_ORG_ID`
+or `--org` selects another org, that default site is ignored and commands run
+at org scope. An explicit `--site` (name or ID) must belong to the selected
+org, and cannot be combined with `-A/--all-sites`.
 
 `mistctl config clouds` lists the supported clouds. Cloud names accept the
 short name (`global01`, `emea02`, `apac01`, `gov`), the API host
