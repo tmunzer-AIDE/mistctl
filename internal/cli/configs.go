@@ -224,7 +224,9 @@ func toFloat(v any) float64 {
 	return 0
 }
 
-// percent renders an SLE score: fractions (0..1) become percentages.
+// percent renders a ratio the API reports as a fraction (SLE scores, RRM
+// channel uniformity: 0..1) as a percentage. A value above 1 can only be a
+// percentage already and is shown as is.
 func percent(v any) string {
 	n, ok := v.(json.Number)
 	if !ok {
@@ -297,7 +299,7 @@ func (a *app) deviceMAC(ctx context.Context, q string) (*string, error) {
 		m := cache.NormalizeMAC(q)
 		return &m, nil
 	}
-	e, err := a.lookup(ctx, kindDevices, q)
+	e, err := a.lookupDevice(ctx, q)
 	if err != nil {
 		return nil, err
 	}

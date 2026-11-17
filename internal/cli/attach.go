@@ -80,7 +80,7 @@ func (a *app) completeAttach(cmd *cobra.Command, args []string, toComplete strin
 }
 
 func (a *app) attach(ctx context.Context, name, node string) error {
-	e, err := a.lookup(ctx, kindDevices, name)
+	e, err := a.lookupDevice(ctx, name)
 	if err != nil {
 		return err
 	}

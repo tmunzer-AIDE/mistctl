@@ -35,6 +35,9 @@ func (a *app) config() (*config.Config, error) {
 		return nil, err
 	}
 	a.cfg = c
+	if w := c.PermissionWarning(); w != "" {
+		fmt.Fprintln(a.err, w)
+	}
 	return c, nil
 }
 
@@ -171,10 +174,21 @@ func (a *app) index(ctx context.Context, kind string, stale bool) ([]cache.Entry
 		org = id.String()
 	}
 	scope := a.scopeKey(org)
+	if e, ok := a.idx[scope+"/"+kind]; ok {
+		return e, nil
+	}
 	if e, fresh, ok := a.cache().Get(scope, kind); ok && (fresh || stale) {
 		return e, nil
 	}
 	return a.refreshIndex(ctx, kind, org)
+}
+
+// memoIndex remembers an index that is known to be current.
+func (a *app) memoIndex(scope, kind string, entries []cache.Entry) {
+	if a.idx == nil {
+		a.idx = map[string][]cache.Entry{}
+	}
+	a.idx[scope+"/"+kind] = entries
 }
 
 func (a *app) refreshIndex(ctx context.Context, kind, org string) ([]cache.Entry, error) {
@@ -199,13 +213,16 @@ func (a *app) refreshIndex(ctx context.Context, kind, org string) ([]cache.Entry
 	if err != nil {
 		return nil, err
 	}
+	a.memoIndex(a.scopeKey(org), kind, entries)
 	_ = a.cache().Put(a.scopeKey(org), kind, entries)
 	return entries, nil
 }
 
 // storeIndex saves an index built from a full listing fetched for display.
 func (a *app) storeIndex(kind, org string, items []json.RawMessage) {
-	_ = a.cache().Put(a.scopeKey(org), kind, toEntries(items))
+	entries := toEntries(items)
+	a.memoIndex(a.scopeKey(org), kind, entries)
+	_ = a.cache().Put(a.scopeKey(org), kind, entries)
 }
 
 func toEntries(items []json.RawMessage) []cache.Entry {
@@ -232,9 +249,43 @@ func toEntries(items []json.RawMessage) []cache.Entry {
 // lookup resolves q (name, ID or MAC) against an index, refreshing once if
 // the cached index does not know it.
 func (a *app) lookup(ctx context.Context, kind, q string) (cache.Entry, error) {
-	entries, err := a.index(ctx, kind, false)
+	m, err := a.matches(ctx, kind, q)
 	if err != nil {
 		return cache.Entry{}, err
+	}
+	return pickEntry(kind, q, m)
+}
+
+// lookupDevice is lookup for devices, with one more rule: when several
+// devices share the name, the selected site (--site or the context's)
+// decides between them.
+func (a *app) lookupDevice(ctx context.Context, q string) (cache.Entry, error) {
+	m, err := a.matches(ctx, kindDevices, q)
+	if err != nil {
+		return cache.Entry{}, err
+	}
+	if len(m) > 1 {
+		if site, ok, serr := a.siteID(ctx); serr == nil && ok {
+			var in []cache.Entry
+			for _, e := range m {
+				if strings.EqualFold(e.SiteID, site.String()) {
+					in = append(in, e)
+				}
+			}
+			if len(in) > 0 {
+				m = in
+			}
+		}
+	}
+	return pickEntry(kindDevices, q, m)
+}
+
+// matches returns the index entries matching q, refreshing the index once
+// if the cached one does not know it.
+func (a *app) matches(ctx context.Context, kind, q string) ([]cache.Entry, error) {
+	entries, err := a.index(ctx, kind, false)
+	if err != nil {
+		return nil, err
 	}
 	m := cache.Match(entries, q)
 	if len(m) == 0 {
@@ -243,11 +294,19 @@ func (a *app) lookup(ctx context.Context, kind, q string) (cache.Entry, error) {
 			id, _ := a.orgID(ctx)
 			org = id.String()
 		}
+		if _, current := a.idx[a.scopeKey(org)+"/"+kind]; current {
+			// Already fetched by this process: asking again changes nothing.
+			return nil, nil
+		}
 		if entries, err = a.refreshIndex(ctx, kind, org); err != nil {
-			return cache.Entry{}, err
+			return nil, err
 		}
 		m = cache.Match(entries, q)
 	}
+	return m, nil
+}
+
+func pickEntry(kind, q string, m []cache.Entry) (cache.Entry, error) {
 	switch len(m) {
 	case 0:
 		return cache.Entry{}, fmt.Errorf("%s %q not found", strings.TrimSuffix(kind, "s"), q)
@@ -282,7 +341,15 @@ func (a *app) fetchOrgIndex(ctx context.Context) ([]cache.Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	entries := orgEntriesFromSelf(raw)
+	entries, _ := a.orgEntries(ctx, raw)
+	return entries, nil
+}
+
+// orgEntries returns every org the token can see: the orgs named by its
+// privileges plus the orgs of its MSP privileges (mspOf: org ID -> MSP name
+// for the latter).
+func (a *app) orgEntries(ctx context.Context, raw json.RawMessage) (entries []cache.Entry, mspOf map[string]string) {
+	entries, mspOf = orgEntriesFromSelf(raw), map[string]string{}
 	// An MSP privilege carries no org_id: its orgs come from the MSP.
 	seen := map[string]bool{}
 	for _, e := range entries {
@@ -299,12 +366,13 @@ func (a *app) fetchOrgIndex(ctx context.Context) ([]cache.Entry, error) {
 			if k := strings.ToLower(o.ID); o.ID != "" && !seen[k] {
 				seen[k] = true
 				o.Type = m.role
+				mspOf[o.ID] = m.name
 				entries = append(entries, o)
 			}
 		}
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name) })
-	return entries, nil
+	return entries, mspOf
 }
 
 type mspPrivilege struct {

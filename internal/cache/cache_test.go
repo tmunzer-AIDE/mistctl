@@ -98,3 +98,21 @@ func TestClearRefusesUnsafeRoots(t *testing.T) {
 		}
 	}
 }
+
+// Without a per-user cache directory the cache is off, never a shared path
+// under the temp directory.
+func TestNoUserCacheDirDisablesCache(t *testing.T) {
+	for _, k := range []string{"MISTCTL_CACHE_DIR", "XDG_CACHE_HOME", "HOME", "LocalAppData", "home"} {
+		t.Setenv(k, "")
+	}
+	if d := DefaultDir(); d != "" {
+		t.Fatalf("DefaultDir() = %q, want none", d)
+	}
+	s := &Store{Dir: "", TTL: time.Minute}
+	if err := s.Put("0123456789abcdef", "sites", []Entry{{ID: "x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := s.Get("0123456789abcdef", "sites"); ok {
+		t.Fatal("a store without a directory must not return entries")
+	}
+}

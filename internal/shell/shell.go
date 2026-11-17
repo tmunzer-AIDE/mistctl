@@ -213,6 +213,11 @@ func Run(ctx context.Context, o Options) error {
 	case <-ctx.Done():
 		err = ctx.Err()
 	}
+	if errors.Is(err, ErrLost) {
+		// Nobody is there to answer a close handshake: do not wait for one.
+		conn.CloseNow()
+		return err
+	}
 	conn.Close(websocket.StatusNormalClosure, "")
 	return err
 }

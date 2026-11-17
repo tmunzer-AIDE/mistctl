@@ -44,7 +44,11 @@ func DefaultDir() string {
 	}
 	d, err := os.UserCacheDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), "mistctl-cache")
+		// No per-user cache directory (e.g. $HOME unset in a cron job or a
+		// container). A fixed path under the shared temp directory could be
+		// prepared by another local user to feed mistctl names and IDs, so
+		// the cache is off instead: an empty Dir disables the Store.
+		return ""
 	}
 	return filepath.Join(d, "mistctl")
 }
@@ -62,7 +66,7 @@ func (s *Store) path(scope, kind string) string {
 
 // Get returns cached entries and whether they are still fresh.
 func (s *Store) Get(scope, kind string) (entries []Entry, fresh bool, ok bool) {
-	if s == nil || s.Disabled {
+	if s == nil || s.Disabled || s.Dir == "" {
 		return nil, false, false
 	}
 	b, err := os.ReadFile(s.path(scope, kind))
@@ -78,7 +82,7 @@ func (s *Store) Get(scope, kind string) (entries []Entry, fresh bool, ok bool) {
 
 // Put stores entries.
 func (s *Store) Put(scope, kind string, entries []Entry) error {
-	if s == nil || s.Disabled {
+	if s == nil || s.Disabled || s.Dir == "" {
 		return nil
 	}
 	p := s.path(scope, kind)

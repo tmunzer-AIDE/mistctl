@@ -62,14 +62,26 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 			if o.limit < 0 {
 				return fmt.Errorf("invalid --limit %d (must be 0 for all, or more)", o.limit)
 			}
+			if err := o.checkWindow(); err != nil {
+				return err
+			}
+			// With NAME arguments --limit caps the rows shown, not the
+			// items searched: a full listing is fetched whole, so a name
+			// beyond the first --limit items is still found. Searches keep
+			// their fetch limit (they can be very large).
+			limit := o.limit
+			if len(args) > 0 && r.DefaultLimit == 0 {
+				o.limit = 0
+			}
 			items, err := r.List(ctx, a, o)
 			if err != nil {
 				return err
 			}
+			fetched := len(items)
 			// --limit always caps the rows, even for resources whose API
 			// returns everything in one answer.
-			if o.limit > 0 && len(items) > o.limit {
-				items = items[:o.limit]
+			if len(args) == 0 && limit > 0 && len(items) > limit {
+				items = items[:limit]
 			}
 			// Enrich first so NAME can match derived fields (device_name, ...).
 			if r.Enrich != nil && (r.EnrichAlways || a.output == "wide" || a.output == "json" || a.output == "yaml") {
@@ -78,7 +90,13 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 			if len(args) > 0 {
 				items = filterItems(items, args, r.MatchKeys)
 				if len(items) == 0 {
+					if o.limit > 0 && fetched >= o.limit {
+						return fmt.Errorf("%s %s not found in the %d items fetched; raise --limit (0 = all) or narrow the search with filters", r.Singular, strings.Join(args, ", "), fetched)
+					}
 					return fmt.Errorf("%s %s not found", r.Singular, strings.Join(args, ", "))
+				}
+				if limit > 0 && len(items) > limit {
+					items = items[:limit]
 				}
 			}
 			cols := r.Columns
@@ -105,7 +123,7 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 			return p.PrintList(a.out, items, cols)
 		},
 	}
-	cmd.Flags().IntVar(&o.limit, "limit", r.DefaultLimit, "maximum number of items to fetch and show (0 = all); NAME arguments filter the fetched items")
+	cmd.Flags().IntVar(&o.limit, "limit", r.DefaultLimit, "maximum number of items to fetch and show (0 = all); with NAME arguments, searches filter the fetched items")
 	if r.Flags != nil {
 		r.Flags(cmd.Flags(), o)
 	}
