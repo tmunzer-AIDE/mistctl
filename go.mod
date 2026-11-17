@@ -8,7 +8,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.9
+	github.com/spf13/pflag v1.1.0
 	github.com/tmunzer/mistapi-go v0.4.110
 	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
