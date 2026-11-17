@@ -80,3 +80,11 @@ func TestParseWhen(t *testing.T) {
 		t.Error("garbage should give the zero time")
 	}
 }
+
+func TestFoldAEMembers(t *testing.T) {
+	ls := []learnt{lt("sw2", "ge-0/0/14", "2026-11-17T04:38:02.177+0000"), lt("sw2", "ge-0/0/15", "2026-11-17T04:38:03.177+0000"), lt("sw2", "ge-0/0/12", "2026-10-29T17:21:50.273+0000")}
+	pi := portInfo{parents: map[swPort]string{{"sw2", "ge-0/0/14"}: "ae0", {"sw2", "ge-0/0/15"}: "ae0"}}
+	if got := strings.Join(ports(pi.fold(ls)), ";"); got != "sw2 ae0;sw2 ge-0/0/12" {
+		t.Errorf("got %q", got)
+	}
+}

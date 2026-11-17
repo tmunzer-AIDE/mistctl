@@ -46,8 +46,13 @@ func learntOf(m map[string]any) []learnt {
 		if !ok {
 			continue
 		}
+		// An AE member (e.g. learnt via LLDP) is reported as its bundle.
+		port := output.Text(e["port_id"])
+		if parent := output.Text(e["port_parent"]); parent != "" {
+			port = parent
+		}
 		l := learnt{
-			swPort: swPort{cache.NormalizeMAC(output.Text(e["device_mac"])), output.Text(e["port_id"])},
+			swPort: swPort{cache.NormalizeMAC(output.Text(e["device_mac"])), port},
 			when:   parseWhen(output.Text(e["when"])),
 		}
 		if l.mac == "" || l.port == "" {
@@ -125,34 +130,39 @@ func pickAccess(ls []learnt, uplinks map[swPort]bool, load map[swPort]int) []lea
 // "access_port_id" to wired client records, for the table columns.
 func addAccessPorts(ctx context.Context, a *app, items []json.RawMessage) []json.RawMessage {
 	all := make([][]learnt, len(items))
-	load := map[swPort]int{}
 	ambiguous := map[string]bool{}
+	found := false
 	for i, it := range items {
 		ls := learntOf(output.Decode(it))
 		all[i] = ls
-		for _, l := range ls {
-			load[l.swPort]++
-		}
+		found = found || len(ls) > 0
 		if len(ls) > 1 {
 			for _, l := range ls {
 				ambiguous[l.mac] = true
 			}
 		}
 	}
-	if len(load) == 0 {
+	if !found {
 		return items
 	}
 	names := deviceNamesByMAC(ctx, a)
-	var uplinks map[swPort]bool
+	var info portInfo
 	if len(ambiguous) > 0 && len(ambiguous) <= maxPortLookups {
-		uplinks = uplinkPorts(ctx, a, ambiguous)
+		info = uplinkPorts(ctx, a, ambiguous)
+	}
+	load := map[swPort]int{}
+	for i := range all {
+		all[i] = info.fold(all[i])
+		for _, l := range all[i] {
+			load[l.swPort]++
+		}
 	}
 	for i, ls := range all {
 		if len(ls) == 0 {
 			continue
 		}
 		var devs, ports []string
-		for _, l := range pickAccess(ls, uplinks, load) {
+		for _, l := range pickAccess(ls, info.uplinks, load) {
 			d := names[l.mac]
 			if d == "" {
 				d = l.mac
@@ -170,14 +180,15 @@ func addAccessPorts(ctx context.Context, a *app, items []json.RawMessage) []json
 // bundles with such a member. An AE to a server or firewall stays an access
 // port. Gateway-facing ports are kept too: the only MACs learnt there are
 // the gateway's own. Errors are ignored: the caller falls back to heuristics.
-func uplinkPorts(ctx context.Context, a *app, switches map[string]bool) map[swPort]bool {
+func uplinkPorts(ctx context.Context, a *app, switches map[string]bool) portInfo {
+	info := portInfo{uplinks: map[swPort]bool{}, parents: map[swPort]string{}}
 	cl, err := a.client()
 	if err != nil {
-		return nil
+		return info
 	}
 	org, err := a.orgID(ctx)
 	if err != nil {
-		return nil
+		return info
 	}
 	infra := map[string]bool{}
 	if entries, err := a.index(ctx, kindDevices, true); err == nil {
@@ -192,7 +203,6 @@ func uplinkPorts(ctx context.Context, a *app, switches map[string]bool) map[swPo
 		macs = append(macs, m)
 	}
 	sort.Strings(macs)
-	out := map[swPort]bool{}
 	for _, mac := range macs {
 		mac := mac
 		ports, err := client.SearchAll(ctx, 0, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
@@ -205,15 +215,51 @@ func uplinkPorts(ctx context.Context, a *app, switches map[string]bool) map[swPo
 		}
 		for _, p := range ports {
 			m := output.Decode(p)
+			port, parent := output.Text(m["port_id"]), output.Text(m["port_parent"])
+			if parent != "" {
+				info.parents[swPort{mac, port}] = parent
+			}
 			neighbor := cache.NormalizeMAC(output.Text(m["neighbor_mac"]))
 			if neighbor == "" || !infra[neighbor] {
 				continue
 			}
-			out[swPort{mac, output.Text(m["port_id"])}] = true
-			if parent := output.Text(m["port_parent"]); parent != "" {
-				out[swPort{mac, parent}] = true
+			info.uplinks[swPort{mac, port}] = true
+			if parent != "" {
+				info.uplinks[swPort{mac, parent}] = true
 			}
 		}
+	}
+	return info
+}
+
+// portInfo is what the port stats tell about the switches a client was
+// learnt on.
+type portInfo struct {
+	uplinks map[swPort]bool
+	// parents maps AE member ports to their bundle.
+	parents map[swPort]string
+}
+
+// fold reports AE member ports as their bundle (a host on a LAG is learnt
+// on each member via LLDP), keeping the newest entry per port.
+func (pi portInfo) fold(ls []learnt) []learnt {
+	if len(pi.parents) == 0 {
+		return ls
+	}
+	out := make([]learnt, 0, len(ls))
+	seen := map[swPort]int{}
+	for _, l := range ls {
+		if parent := pi.parents[l.swPort]; parent != "" {
+			l.port = parent
+		}
+		if i, dup := seen[l.swPort]; dup {
+			if l.when.After(out[i].when) {
+				out[i].when = l.when
+			}
+			continue
+		}
+		seen[l.swPort] = len(out)
+		out = append(out, l)
 	}
 	return out
 }

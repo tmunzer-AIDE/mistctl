@@ -377,16 +377,16 @@ func describeWired(ctx context.Context, a *app, mac string) (*described, error) 
 	learntOn := ""
 	if ls := learntOf(m); len(ls) > 0 {
 		names := deviceNamesByMAC(ctx, a)
-		var uplinks map[swPort]bool
+		var info portInfo
 		if len(ls) > 1 {
 			switches := map[string]bool{}
 			for _, l := range ls {
 				switches[l.mac] = true
 			}
-			uplinks = uplinkPorts(ctx, a, switches)
+			info = uplinkPorts(ctx, a, switches)
 		}
 		var devs, macs, ports []string
-		for _, l := range pickAccess(ls, uplinks, nil) {
+		for _, l := range pickAccess(info.fold(ls), info.uplinks, nil) {
 			d := names[l.mac]
 			if d == "" {
 				d = l.mac
