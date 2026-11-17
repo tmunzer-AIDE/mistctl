@@ -42,13 +42,13 @@ var resourceHelps = map[string]resourceHelp{
 		group: "inventory", title: "organization",
 		about:            "Lists the organizations of the token's privileges, with the role the token has in each. No org needs to be selected.",
 		examples:         []string{"get orgs", "get orgs -o wide"},
-		describe:         "Prints the org object (GET /orgs/{org_id}) and its counters (sites, devices, connected and disconnected devices, inventory). This is the org itself, not the org settings endpoint.",
+		describe:         "Prints the org object (GET /orgs/{org_id}) and its counters (sites, devices, connected and disconnected devices, inventory). This is the org itself; see `describe org-settings` for its settings.",
 		describeExamples: []string{"describe org ACME", "describe org ACME -o json"},
 	},
 	"sites": {
 		group: "inventory", title: "site",
 		examples:         []string{"get sites", "get sites -o wide", "get site HQ -o yaml"},
-		describe:         "Prints the site object (GET /sites/{site_id}) and its counters (connected APs, switches and gateways, clients). This is the site itself, not its settings or derived settings.",
+		describe:         "Prints the site object (GET /sites/{site_id}) and its counters (connected APs, switches and gateways, clients). This is the site itself; see `describe site-settings` (and --derived) for its settings.",
 		describeExamples: []string{"describe site HQ"},
 	},
 	"devices": {
@@ -92,6 +92,51 @@ row.`,
 		describeExamples: []string{"describe mxedge edge-01"},
 	},
 
+	"inventory": {
+		group: "inventory", title: "inventory device",
+		short: "Devices claimed in the org (assigned to a site or not), with serial and model",
+		about: `Lists the devices of the org inventory, including the ones not assigned to
+a site, which device stats never show. --type, --model, --serial, --mac and
+--state unassigned are applied by the API; --state assigned is applied
+locally. With a site, only the devices assigned to it are listed.`,
+		examples: []string{
+			"get inventory",
+			"get inventory --state unassigned",
+			"get inventory --type switch --model EX4100-48P -o wide",
+			"get inventory --serial A0123456789",
+			"get inventory --site HQ",
+		},
+	},
+	"org-settings": {
+		group: "config", title: "org settings",
+		about:            "Shows the settings of the org: password policy, Mist NAC, security, API policy and more. They apply to every site unless a site or template overrides them. Use -o yaml to see every field.",
+		examples:         []string{"get org-settings", "get org-settings -o yaml"},
+		describe:         "Prints the org settings document (GET /orgs/{org_id}/setting) with the list of configured sections. ORG is the org name or ID.",
+		describeExamples: []string{"describe org-settings ACME"},
+	},
+	"site-settings": {
+		group: "config", title: "site settings",
+		about: `Shows the settings of a site. With --derived, shows the effective settings:
+the site settings combined with the org settings and the templates that
+apply to the site, which explains where a value comes from when the site
+does not set it.`,
+		examples:         []string{"get site-settings --site HQ", "get site-settings --site HQ --derived -o yaml"},
+		describe:         "Prints the settings document of one site (GET /sites/{site_id}/setting), or its effective settings with --derived (GET /sites/{site_id}/setting/derived). SITE is the site name or ID.",
+		describeOrgWide:  true,
+		describeExamples: []string{"describe site-settings HQ", "describe site-settings HQ --derived"},
+	},
+	"deviceprofiles": {
+		group: "config", title: "device profile",
+		about:            "Lists the AP, switch and gateway profiles of the org (one API call per type; --type reads only one).",
+		examples:         []string{"get deviceprofiles", "get deviceprofiles --type switch"},
+		describeExamples: []string{"describe deviceprofile \"Lobby APs\""},
+	},
+	"sitegroups": {
+		group: "config", title: "site group",
+		examples:         []string{"get sitegroups"},
+		describe:         "Prints the site group followed by its sites (the sites whose sitegroup_ids name it; one extra API call).",
+		describeExamples: []string{"describe sitegroup EMEA"},
+	},
 	"wlans": {
 		group: "config", title: "WLAN",
 		short: "WLANs: org-level (template) WLANs, or the WLANs applied to a site",

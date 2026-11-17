@@ -34,6 +34,8 @@ type configSpec struct {
 	org            pager
 	site           pager
 	siteUnpaged    bool // the site endpoint returns everything at once
+	// list optionally replaces org/site paging (e.g. several calls merged).
+	list func(ctx context.Context, a *app, cl *client.Client, max int) ([]json.RawMessage, error)
 	// details optionally replaces the listed object in `describe` (e.g. a
 	// GET by ID that returns more fields, or related objects).
 	details func(ctx context.Context, a *app, cl *client.Client, item json.RawMessage) (json.RawMessage, error)
@@ -95,6 +97,9 @@ func listConfig(ctx context.Context, a *app, s configSpec, max int) ([]json.RawM
 	cl, err := a.client()
 	if err != nil {
 		return nil, err
+	}
+	if s.list != nil {
+		return s.list(ctx, a, cl, max)
 	}
 	org, site, hasSite, err := a.scope(ctx, s.name, s.scope)
 	if err != nil {

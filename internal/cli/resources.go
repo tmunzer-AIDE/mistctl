@@ -30,6 +30,11 @@ type listOpts struct {
 	vrf        string // bgp-peers, ospf-peers
 	sle        string // sles: wifi, wired, wan
 	band       string // rrm
+	model      string // inventory
+	serial     string // inventory
+	mac        string // inventory, clients, nac/wan clients
+	state      string // inventory: assigned, unassigned
+	derived    bool   // site-settings
 }
 
 // resource is one curated Mist object type.
@@ -145,7 +150,7 @@ func findResource(name string) (*resource, error) {
 
 func init() {
 	registry = []*resource{
-		orgsResource(), sitesResource(), devicesResource(), clientsResource(),
+		orgsResource(), sitesResource(), devicesResource(), inventoryResource(), clientsResource(),
 		// configuration objects
 		wlansResource(), wlanTemplatesResource(),
 		orgTemplateResource("rftemplates", "rftemplate", "RF templates", "/rftemplates", listOrgRfTemplates),
@@ -154,6 +159,7 @@ func init() {
 		orgTemplateResource("gatewaytemplates", "gatewaytemplate", "WAN edge (gateway) templates", "/gatewaytemplates", listOrgGatewayTemplates),
 		networksResource(), servicesResource(), evpnTopologiesResource(),
 		mapsResource(), mapstacksResource(),
+		orgSettingsResource(), siteSettingsResource(), deviceProfilesResource(), siteGroupsResource(),
 		// monitoring
 		alarmsResource(), eventsResource(), slesResource(), rrmResource(), rrmEventsResource(),
 		// stats
@@ -167,13 +173,15 @@ func init() {
 // whose rows have no (unique) name.
 func applyNameKeys() {
 	keys := map[string][]string{
-		"clients":    {"mac"},
-		"wlans":      {"ssid", "id"},
-		"rrm":        {"band"},
-		"alarms":     {"id"},
-		"events":     {"type"},
-		"sles":       {"site_name|site_id"},
-		"rrm-events": {"device_name|ap"},
+		"clients":       {"mac"},
+		"wlans":         {"ssid", "id"},
+		"rrm":           {"band"},
+		"alarms":        {"id"},
+		"events":        {"type"},
+		"sles":          {"site_name|site_id"},
+		"rrm-events":    {"device_name|ap"},
+		"org-settings":  {"org_name|org_id"},
+		"site-settings": {"site_name|site_id"},
 	}
 	joined := map[string][]string{
 		"ports":      {"device_name|mac", "port_id"},
