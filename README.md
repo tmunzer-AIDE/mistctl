@@ -51,6 +51,12 @@ mistctl get clients --site HQ
 mistctl get clients --type wired -A --duration 7d
 mistctl describe device ap-lobby
 mistctl describe client aa:bb:cc:dd:ee:ff -o json
+mistctl get wlans --site HQ
+mistctl get alarms --group infra --severity critical --duration 7d
+mistctl get events --device sw-core --type SW_PORT_DOWN
+mistctl get sles --sle wired
+mistctl get ports --device sw-core --status down
+mistctl get rrm --site HQ --band 5
 ```
 
 ## Commands
@@ -72,8 +78,22 @@ mistctl describe client aa:bb:cc:dd:ee:ff -o json
 | --- | --- | --- | --- |
 | `orgs` | `org` | token | `/self`, `/orgs/{id}`, `/orgs/{id}/stats` |
 | `sites` | `site` | org | `/orgs/{id}/sites`, `/sites/{id}`, `/sites/{id}/stats` |
-| `devices` | `device`, `dev` | org or site | `/orgs/{id}/stats/devices`, `/sites/{id}/stats/devices`, `/sites/{id}/devices/{id}` |
+| `devices` | `device`, `dev` | org or site | `/orgs/{id}/stats/devices`, `/sites/{id}/stats/devices`, `/sites/{id}/devices/{id}`; Mist Edges are included (`--type mxedge` for only them) from `/orgs/{id}/stats/mxedges` |
 | `clients` | `client`, `cl` | org or site | A MAC seen both ways is one line with TYPE `wireless,wired` (wired records nested under `wired` in JSON); `describe client` shows both unless `--type` is set. Wireless: `/sites/{id}/stats/clients` (connected now, with a site) or `/orgs/{id}/clients/search`; wired: `/orgs/{id}/wired_clients/search` or `/sites/{id}/wired_clients/search`. `--type wireless\|wired\|all`, `--duration` (default 1d) for searches. For wired clients the table shows only the access switch and port: inter-switch links (ports, or AE bundles, whose LLDP neighbor is an org switch, from `/orgs/{id}/stats/ports/search`, up to 20 switches), stale locations and finally the busiest ports are dropped. JSON/YAML keep every location in `device_mac_port` |
+| `wlans` | `wlan`, `ssids` | org or site | `/orgs/{id}/wlans`; with a site, the WLANs applied to it (`/sites/{id}/wlans/derived`) |
+| `wlantemplates` | `templates` | org | `/orgs/{id}/templates` (describe lists the template's WLANs) |
+| `rftemplates`, `aptemplates`, `networktemplates`, `gatewaytemplates` | | org | `/orgs/{id}/rftemplates`, ... |
+| `networks`, `services` | `net`, `svc` | org | `/orgs/{id}/networks`, `/orgs/{id}/services` |
+| `evpn-topologies` | `evpn` | org or site | `/orgs/{id}/evpn_topologies`, `/sites/{id}/evpn_topologies` (describe shows the switches) |
+| `maps`, `mapstacks` | `floorplans` | site | `/sites/{id}/maps`, `/sites/{id}/mapstacks` |
+| `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration`, `--group`, `--severity`, `--type` |
+| `events` | `ev` | org or site | device, client or system event searches (`--source`), with `--duration`, `--type`, `--device` |
+| `sles` | | org or site | `/orgs/{id}/insights/sites-sle` (`--sle wifi\|wired\|wan`), one row per site |
+| `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current` (one row per band: APs per channel/power, noise, neighbors; `-o wide` adds the RF template limits, `-o json` keeps any per-AP plan under `aps`), `/sites/{id}/rrm/events` |
+| `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`) |
+| `bgp-peers`, `ospf-peers` | `bgp`, `ospf` | org or site | `/stats/bgp_peers/search`, `/stats/ospf_peers/search` |
+| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port |
+| `zones` | | site | `/sites/{id}/stats/zones` |
 
 Objects can be referred to by name, ID, or (devices and clients) MAC address in
 any format (`5c5b35000001`, `5C:5B:35:00:00:01`, `5c-5b-...`).
@@ -146,7 +166,7 @@ Release packages install completions automatically.
 
 - `mistctl api <path...>`: path-style access to every GET endpoint of the Mist
   OpenAPI spec, with completion from the spec and the cache.
-- More curated resources (WLANs, alarms, events, SLEs, templates, ...).
+- More curated resources (NAC clients, site-level templates, ...).
 - `mistctl attach <device>`: read-only remote shell for Observer users.
 
 ## Development

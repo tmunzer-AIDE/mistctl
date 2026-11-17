@@ -15,7 +15,17 @@ func newWhoamiCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "whoami",
 		Short: "Show the identity and privileges of the current token",
-		Args:  cobra.NoArgs,
+		Long: `Show who the current API token belongs to, which cloud and context are in
+use, and the orgs and sites the token can access with its role in each.
+
+mistctl warns when the token can do more than read: mistctl itself only sends
+GET requests, but a read-only (Observer) token is the safer choice.
+
+With -o json or -o yaml, prints the raw answer of GET /api/v1/self.`,
+		Example: `  mistctl whoami
+  mistctl whoami --context lab
+  mistctl whoami -o yaml`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			t, err := a.resolveTarget()
 			if err != nil {

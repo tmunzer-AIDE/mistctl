@@ -45,6 +45,12 @@ func newSetContextCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set-context NAME",
 		Short: "Create or update a context",
+		Long: `Create a context, or update the given fields of an existing one. A context
+needs a cloud and a token; the org and site are optional defaults.
+
+The first context created becomes the current one; pass --use to switch to a
+context while creating or updating it. The org and site can be names or IDs;
+names are resolved when a command runs.`,
 		Example: `  # Token read from stdin (keeps it out of shell history)
   echo "$TOKEN" | mistctl config set-context prod --cloud global01 --token-stdin --org "ACME"
 
@@ -130,9 +136,12 @@ func newSetContextCmd(a *app) *cobra.Command {
 
 func newUseContextCmd(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:               "use-context NAME",
-		Aliases:           []string{"use"},
-		Short:             "Set the current context",
+		Use:     "use-context NAME",
+		Aliases: []string{"use"},
+		Short:   "Set the current context",
+		Long: `Make NAME the current context: the one every command uses unless --context
+or $MISTCTL_CONTEXT says otherwise.`,
+		Example:           `  mistctl config use-context prod`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.completeContexts,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -158,7 +167,10 @@ func newGetContextsCmd(a *app) *cobra.Command {
 		Use:     "get-contexts",
 		Aliases: []string{"contexts"},
 		Short:   "List contexts",
-		Args:    cobra.NoArgs,
+		Long: `List the contexts of the config file with their cloud, default org and site,
+and where their token comes from (a masked value, or the environment variable
+it is read from). The current context is marked with *.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.config()
 			if err != nil {
@@ -201,7 +213,7 @@ func redact(tok string) string {
 func newCurrentContextCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "current-context",
-		Short: "Print the current context",
+		Short: "Print the name of the current context",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.config()
@@ -219,8 +231,10 @@ func newCurrentContextCmd(a *app) *cobra.Command {
 
 func newDeleteContextCmd(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:               "delete-context NAME",
-		Short:             "Delete a context from the local config file",
+		Use:   "delete-context NAME",
+		Short: "Delete a context from the local config file",
+		Long: `Delete a context (and its stored token) from the local config file. Nothing
+changes in Mist: the API token itself stays valid until it is revoked there.`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.completeContexts,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -249,7 +263,10 @@ func newViewConfigCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "view",
 		Short: "Print the config file (tokens redacted unless --raw)",
-		Args:  cobra.NoArgs,
+		Long: `Print the config file as YAML. Tokens are replaced by a redacted value unless
+--raw is given. The file location is $MISTCTL_CONFIG, --config, or
+<user config dir>/mistctl/config.yaml.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.config()
 			if err != nil {
@@ -278,7 +295,10 @@ func newCloudsCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "clouds",
 		Short: "List the Mist clouds mistctl can talk to",
-		Args:  cobra.NoArgs,
+		Long: `List the Mist clouds with their API and portal hosts. --cloud (in
+` + "`config set-context`" + `) and $MIST_HOST accept the short name, the API host or
+the portal host, so the URL you use to log in to Mist works too.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tw := tabwriter.NewWriter(a.out, 0, 0, 3, ' ', 0)
 			fmt.Fprintln(tw, "NAME\tAPI HOST\tPORTAL")
