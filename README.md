@@ -103,23 +103,35 @@ mistctl get rrm --site HQ --band 5
 | Resource | Short names | Scope | Source endpoints |
 | --- | --- | --- | --- |
 | `orgs` | `org` | token | `/self`, `/orgs/{id}`, `/orgs/{id}/stats` |
-| `sites` | `site` | org | `/orgs/{id}/sites`, `/sites/{id}`, `/sites/{id}/stats` |
+| `sites` | `site` | org | `/orgs/{id}/sites`, `/sites/{id}`, `/sites/{id}/stats`; `--sitegroup`, `--template` |
 | `devices` | `device`, `dev` | org or site | `/orgs/{id}/stats/devices`, `/sites/{id}/stats/devices`, `/sites/{id}/devices/{id}`; Mist Edges are included (`--type mxedge` for only them) from `/orgs/{id}/stats/mxedges` |
-| `clients` | `client`, `cl` | org or site | A MAC seen both ways is one line with TYPE `wireless,wired` (wired records nested under `wired` in JSON); `describe client` shows both unless `--type` is set. Wireless: `/sites/{id}/stats/clients` (connected now, with a site) or `/orgs/{id}/clients/search`; wired: `/orgs/{id}/wired_clients/search` or `/sites/{id}/wired_clients/search`. `--type wireless\|wired\|all`, `--duration` (default 1d) for searches. For wired clients the table shows only the access switch and port: inter-switch links (ports, or AE bundles, whose LLDP neighbor is an org switch, from `/orgs/{id}/stats/ports/search`, up to 20 switches), stale locations and finally the busiest ports are dropped. JSON/YAML keep every location in `device_mac_port` |
+| `inventory` | `inv` | org or site | `/orgs/{id}/inventory`: claimed devices, assigned or not, with `--type`, `--model`, `--serial`, `--mac`, `--state assigned\|unassigned` |
+| `clients` | `client`, `cl` | org or site | A MAC seen both ways is one line with TYPE `wireless,wired` (wired records nested under `wired` in JSON); `describe client` shows both unless `--type` is set. Wireless: `/sites/{id}/stats/clients` (connected now, with a site) or `/orgs/{id}/clients/search`; wired: `/orgs/{id}/wired_clients/search` or `/sites/{id}/wired_clients/search`. `--type wireless\|wired\|all`, `--duration` (default 1d) or `--start`/`--end` for searches, `--history` to search a site's wireless clients instead of listing the connected ones; filters `--mac`, `--ip`, `--text`, `--vlan`, `--device`, `--ssid`, `--username` (wireless), `--port`, `--auth-state`, `--auth-method` (wired). For wired clients the table shows only the access switch and port: inter-switch links (ports, or AE bundles, whose LLDP neighbor is an org switch, from `/orgs/{id}/stats/ports/search`, up to 20 switches), stale locations and finally the busiest ports are dropped. JSON/YAML keep every location in `device_mac_port` |
+| `nac-clients` | `nac` | org or site | `/orgs/{id}/nac_clients/search`, `/sites/{id}/nac_clients/search` with `--status`, `--mac`, `--username`, `--ssid`, `--auth-type`, `--vlan`, `--nac-rule`, `--text` |
+| `wan-clients` | | org or site | `/orgs/{id}/wan_clients/search`, `/sites/{id}/wan_clients/search` with `--mac`, `--ip`, `--hostname`, `--network` |
 | `wlans` | `wlan`, `ssids` | org or site | `/orgs/{id}/wlans`; with a site, the WLANs applied to it (`/sites/{id}/wlans/derived`) |
 | `wlantemplates` | `templates` | org | `/orgs/{id}/templates` (describe lists the template's WLANs) |
 | `rftemplates`, `aptemplates`, `networktemplates`, `gatewaytemplates` | | org | `/orgs/{id}/rftemplates`, ... |
 | `networks`, `services` | `net`, `svc` | org | `/orgs/{id}/networks`, `/orgs/{id}/services` |
 | `evpn-topologies` | `evpn` | org or site | `/orgs/{id}/evpn_topologies`, `/sites/{id}/evpn_topologies` (describe shows the switches) |
-| `maps`, `mapstacks` | `floorplans` | site | `/sites/{id}/maps`, `/sites/{id}/mapstacks` |
-| `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration`, `--group`, `--severity`, `--type` |
-| `events` | `ev` | org or site | device, client or system event searches (`--source`), with `--duration`, `--type`, `--device` |
+| `maps`, `mapstacks` | `floorplans` | site | `/sites/{id}/maps` (`--mapstack`), `/sites/{id}/mapstacks` |
+| `org-settings` | | org | `/orgs/{id}/setting` |
+| `site-settings` | | site | `/sites/{id}/setting`; `--derived` for the effective settings (`/sites/{id}/setting/derived`) |
+| `deviceprofiles` | `profiles` | org | `/orgs/{id}/deviceprofiles` (one call per type, or `--type`) |
+| `sitegroups` | | org | `/orgs/{id}/sitegroups` (describe lists the sites) |
+| `alarmtemplates` | | org | `/orgs/{id}/alarmtemplates` |
+| `webhooks` | `wh` | org or site | `/orgs/{id}/webhooks`, `/sites/{id}/webhooks`; secrets and headers are redacted |
+| `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration` or `--start`/`--end`, `--sort`, `--group`, `--severity`, `--type`, `--acked`, `--ack-admin`, `--status` |
+| `events` | `ev` | org or site | device, client, system, NAC or WAN client event searches (`--source`), with `--duration` or `--start`/`--end`, `--sort`, `--type`, `--device`, `--client`, `--text`, `--ssid`, `--band`, `--reason`, `--username` |
+| `alarm-definitions`, `event-definitions` | `alarmdefs`, `eventdefs` | token | `/const/alarm_defs`, `/const/{device,client,system,nac,mxedge}_events`; they also feed `--type` completion of alarms and events |
+| `webhook-deliveries` | `deliveries` | org | `/orgs/{id}/webhooks/{id}/events/search` with `--webhook`, `--status`, `--topic` |
 | `sles` | | org or site | `/orgs/{id}/insights/sites-sle` (`--sle wifi\|wired\|wan`), one row per site |
 | `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current` (one row per band: APs per channel/power, noise, neighbors; `-o wide` adds the RF template limits, `-o json` keeps any per-AP plan under `aps`), `/sites/{id}/rrm/events` |
 | `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`) |
-| `bgp-peers`, `ospf-peers` | `bgp`, `ospf` | org or site | `/stats/bgp_peers/search`, `/stats/ospf_peers/search` |
-| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port |
+| `bgp-peers`, `ospf-peers` | `bgp`, `ospf` | org or site | `/stats/bgp_peers/search`, `/stats/ospf_peers/search` with `--device`, `--vrf`, `--up`, `--neighbor`/`--peer`, `--start`/`--end` |
+| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`, `--port`, `--neighbor`, `--speed`, `--poe`, `--auth-state`, `--stp-state`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port |
 | `zones` | | site | `/sites/{id}/stats/zones` |
+| `tunnels` | `tun` | org or site | `/orgs/{id}/stats/tunnels/search` (`--type wan\|wxtunnel`, `--device`, `--up`, `--peer`) |
 
 Objects can be referred to by name, ID, or (devices and clients) MAC address in
 any format (`5c5b35000001`, `5C:5B:35:00:00:01`, `5c-5b-...`).
@@ -220,7 +232,8 @@ Release packages install completions automatically.
 
 - `mistctl api <path...>`: path-style access to every GET endpoint of the Mist
   OpenAPI spec, with completion from the spec and the cache.
-- More curated resources (NAC clients, site-level templates, ...).
+- More curated resources (licenses, labels and policies, MSP org discovery,
+  topology/LLDP, site-level templates, ...).
 
 ## Development
 
@@ -229,7 +242,18 @@ go test ./...
 go run ./cmd/mistctl --help
 ```
 
-Tests run against an in-process fake Mist API, so no token is needed. Releases
+Tests run against an in-process fake Mist API, so no token is needed.
+
+An optional read-only smoke suite runs against a live org (it spends a few
+hundred API calls of the token's hourly budget):
+
+```sh
+MISTCTL_LIVE_TOKEN=... MISTCTL_LIVE_CLOUD=global01 MISTCTL_LIVE_ORG="My Org" \
+MISTCTL_LIVE_SITE=HQ go test -tags live -run Live -v ./internal/cli/
+```
+
+The `live-smoke` workflow runs it on demand from GitHub Actions, with the same
+variables as repository secrets. Releases
 are built with GoReleaser, see [RELEASING.md](RELEASING.md).
 
 ## License

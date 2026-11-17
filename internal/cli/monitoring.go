@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/pflag"
@@ -58,6 +59,11 @@ func alarmsResource() *resource {
 			output.Col("DEVICES", "hostnames", "aps", "switches", "gateways"),
 			output.Col("LAST-SEEN", "last_seen").WithFormat(output.Age).AsWide(),
 			output.Col("ACKED", "acked").AsWide(),
+			output.Col("ACK-ADMIN", "ack_admin_name").AsWide(),
+			// Marvis alarms carry their resolution state.
+			output.Col("STATUS", "status").AsWide(),
+			output.Col("RESOLVED", "resolved_time").WithFormat(output.Age).AsWide(),
+			output.Col("NOTE", "note").AsWide(),
 			output.Col("ID", "id").AsWide(),
 		},
 		MatchKeys:    []string{"id", "type"},
@@ -67,12 +73,18 @@ func alarmsResource() *resource {
 		FlagValues: map[string][]string{
 			"group":    {"infrastructure", "infra", "marvis", "security", "certificate_expiry"},
 			"severity": alarmSeverities,
+			"acked":    {"true", "false"},
+			"sort":     sortOrders,
 		},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
-			fs.StringVar(&o.duration, "duration", "1d", "search window (e.g. 1h, 1d, 7d)")
+			addWindowFlags(fs, o, "1d", "search window")
+			addSortFlag(fs, o)
 			fs.StringVar(&o.group, "group", "", "alarm group: infrastructure (infra), marvis, security, certificate_expiry (comma-separated)")
 			fs.StringVar(&o.severity, "severity", "", "severity: critical, warn, info (comma-separated)")
 			fs.StringVar(&o.eventType, "type", "", "alarm type, e.g. device_down, switch_down")
+			fs.StringVar(&o.acked, "acked", "", "only acknowledged (true) or unacknowledged (false) alarms")
+			fs.StringVar(&o.ackAdmin, "ack-admin", "", "only alarms acknowledged by this admin (name)")
+			fs.StringVar(&o.status, "status", "", "only alarms in this status, e.g. open, resolved (Marvis alarms; applied locally)")
 		},
 		List: func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
 			group, err := checkEnum("group", o.group, alarmGroups, map[string]string{"infra": "infrastructure"})
@@ -91,14 +103,28 @@ func alarmsResource() *resource {
 			if err != nil {
 				return nil, err
 			}
-			w, err := timeWindow(o.duration)
+			w, err := o.window()
+			if err != nil {
+				return nil, err
+			}
+			acked, err := parseTriBool("acked", o.acked)
 			if err != nil {
 				return nil, err
 			}
 			// Sort server-side so --limit keeps the newest alarms (the API
 			// default is oldest first).
-			srt := client.Ptr(newestFirst)
-			return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+			srt, err := o.searchSort()
+			if err != nil {
+				return nil, err
+			}
+			admin := client.Ptr(o.ackAdmin)
+			var keep func(json.RawMessage) bool
+			if o.status != "" {
+				keep = func(it json.RawMessage) bool {
+					return strings.EqualFold(output.Text(output.Decode(it)["status"]), o.status)
+				}
+			}
+			return client.SearchFiltered(ctx, o.limit, keep, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.AlarmSearchResult], error) {
 					if hasSite {
 						var g *models.AlarmGroupEnum
@@ -111,9 +137,9 @@ func alarmsResource() *resource {
 							v := models.AlarmSeverityEnum(severity)
 							s = &v
 						}
-						return cl.SDK.SitesAlarms().SearchSiteAlarms(ctx, site, g, s, client.Ptr(o.eventType), nil, nil, &limit, w.start, w.end, nil, srt, after)
+						return cl.SDK.SitesAlarms().SearchSiteAlarms(ctx, site, g, s, client.Ptr(o.eventType), admin, acked, &limit, w.start, w.end, nil, srt, after)
 					}
-					return cl.SDK.OrgsAlarms().SearchOrgAlarms(ctx, org, nil, client.Ptr(group), client.Ptr(severity), client.Ptr(o.eventType), nil, nil, w.start, w.end, nil, &limit, srt, after)
+					return cl.SDK.OrgsAlarms().SearchOrgAlarms(ctx, org, nil, client.Ptr(group), client.Ptr(severity), client.Ptr(o.eventType), admin, acked, w.start, w.end, nil, &limit, srt, after)
 				})
 			})
 		},
@@ -122,47 +148,128 @@ func alarmsResource() *resource {
 
 // ---- events ---------------------------------------------------------------
 
-var eventSources = []string{"device", "client", "system"}
+var eventSources = []string{"device", "client", "system", "nac", "wan"}
 
 const newestFirst = "-timestamp"
+
+func eventColumns(source string) []output.Column {
+	age := output.Col("AGE", "timestamp").WithFormat(output.Age)
+	site := output.Col("SITE", "site_name", "site_id")
+	switch source {
+	case "nac":
+		return []output.Column{
+			age,
+			output.Col("TYPE", "type"),
+			output.Col("CLIENT", "mac"),
+			output.Col("USERNAME", "username", "idp_username"),
+			output.Col("AUTH", "auth_type"),
+			output.Col("SSID/PORT", "ssid", "port_id"),
+			output.Col("VLAN", "vlan"),
+			output.Col("DEVICE", "device_name", "ap", "device_mac"),
+			site,
+			output.Col("NAC-RULE", "nacrule_id").AsWide(),
+			output.Col("MATCHED", "nacrule_matched").AsWide(),
+			output.Col("NAS", "nas_vendor").AsWide(),
+			output.Col("REASON", "text").AsWide(),
+		}
+	case "wan":
+		return []output.Column{
+			age,
+			output.Col("TYPE", "ev_type", "type"),
+			output.Col("CLIENT", "mac", "wcid"),
+			output.Col("TEXT", "text"),
+			site,
+			output.Col("WCID", "wcid").AsWide(),
+		}
+	}
+	return []output.Column{
+		age,
+		output.Col("TYPE", "type"),
+		output.Col("DEVICE", "device_name", "ap_name", "mac", "ap"),
+		site,
+		output.Col("TEXT", "text", "reason", "ssid"),
+		output.Col("CLIENT", "client_mac", "bssid").AsWide(),
+		output.Col("MODEL", "model").AsWide(),
+		output.Col("PORT", "port_id").AsWide(),
+	}
+}
 
 func eventsResource() *resource {
 	return &resource{
 		Name: "events", Singular: "event", Aliases: []string{"ev"},
-		Short:    "Device, client or system events over --duration (newest first)",
-		Scope:    "org/site",
-		Endpoint: "GET /api/v1/orgs/{org_id}/devices/events/search, GET /api/v1/sites/{site_id}/devices/events/search, GET /api/v1/orgs/{org_id}/clients/events/search, GET /api/v1/sites/{site_id}/clients/events/search, GET /api/v1/orgs/{org_id}/events/system/search, GET /api/v1/sites/{site_id}/events/system/search",
-		Columns: []output.Column{
-			output.Col("AGE", "timestamp").WithFormat(output.Age),
-			output.Col("TYPE", "type"),
-			output.Col("DEVICE", "device_name", "ap_name", "mac", "ap"),
-			output.Col("SITE", "site_name", "site_id"),
-			output.Col("TEXT", "text", "reason", "ssid"),
-			output.Col("CLIENT", "client_mac", "bssid").AsWide(),
-			output.Col("MODEL", "model").AsWide(),
-			output.Col("PORT", "port_id").AsWide(),
-		},
-		MatchKeys:    []string{"type", "mac", "device_name"},
+		Short:        "Device, client, system, NAC or WAN client events over --duration (newest first)",
+		Scope:        "org/site",
+		Endpoint:     "GET /api/v1/orgs/{org_id}/devices/events/search, GET /api/v1/sites/{site_id}/devices/events/search, GET /api/v1/orgs/{org_id}/clients/events/search, GET /api/v1/sites/{site_id}/clients/events/search, GET /api/v1/orgs/{org_id}/events/system/search, GET /api/v1/sites/{site_id}/events/system/search, GET /api/v1/orgs/{org_id}/nac_clients/events/search, GET /api/v1/sites/{site_id}/nac_clients/events/search, GET /api/v1/orgs/{org_id}/wan_clients/events/search, GET /api/v1/sites/{site_id}/wan_clients/events/search",
+		Columns:      eventColumns("device"),
+		ColumnsFor:   func(o *listOpts) []output.Column { return eventColumns(o.source) },
+		MatchKeys:    []string{"type", "ev_type", "mac", "device_name"},
 		SortDesc:     "timestamp",
 		DefaultLimit: client.PageSize,
 		EnrichAlways: true,
 		Enrich: func(ctx context.Context, a *app, items []json.RawMessage) []json.RawMessage {
 			return addDeviceNameFrom("mac")(ctx, a, addDeviceNameFrom("ap")(ctx, a, items))
 		},
-		FlagValues: map[string][]string{"source": eventSources},
+		FlagValues: map[string][]string{"source": eventSources, "band": rrmBands, "sort": sortOrders},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
-			fs.StringVar(&o.source, "source", "device", "event source: device, client (wireless), system")
-			fs.StringVar(&o.duration, "duration", "1d", "search window (e.g. 1h, 1d, 7d)")
-			fs.StringVar(&o.eventType, "type", "", "event type, e.g. AP_DISCONNECTED, SW_PORT_DOWN, CLIENT_DEAUTHENTICATED")
-			fs.StringVar(&o.device, "device", "", "only events of this device (name, ID or MAC); for client events, the AP")
+			fs.StringVar(&o.source, "source", "device", "event source: device, client (wireless), system, nac, wan (WAN edge clients)")
+			addWindowFlags(fs, o, "1d", "search window")
+			addSortFlag(fs, o)
+			fs.StringVar(&o.eventType, "type", "", "event type, e.g. AP_DISCONNECTED, SW_PORT_DOWN, CLIENT_DEAUTHENTICATED, NAC_CLIENT_DENY")
+			fs.StringVar(&o.device, "device", "", "only events of this device (name, ID or MAC); for client and NAC events, the AP")
+			fs.StringVar(&o.clientMAC, "client", "", "client and NAC/WAN events: only events of this client MAC")
+			fs.StringVar(&o.text, "text", "", "device and NAC events: partial match on the event text")
+			fs.StringVar(&o.ssid, "ssid", "", "client and NAC events: only this SSID")
+			fs.StringVar(&o.band, "band", "", "client events: only this band: 24, 5, 6")
+			fs.StringVar(&o.reason, "reason", "", "client events: only this 802.11 reason code")
+			fs.StringVar(&o.username, "username", "", "NAC events: only this username")
 		},
 		List: listEvents,
 	}
 }
 
+// eventFlagSources lists the sources each source-specific events flag
+// applies to.
+var eventFlagSources = map[string][]string{
+	"device":   {"device", "client", "nac"},
+	"client":   {"client", "nac", "wan"},
+	"text":     {"device", "nac"},
+	"ssid":     {"client", "nac"},
+	"band":     {"client"},
+	"reason":   {"client"},
+	"username": {"nac"},
+}
+
+func checkEventFlags(o *listOpts) error {
+	set := map[string]string{
+		"device": o.device, "client": o.clientMAC, "text": o.text, "ssid": o.ssid,
+		"band": o.band, "reason": o.reason, "username": o.username,
+	}
+	for _, f := range []string{"device", "client", "text", "ssid", "band", "reason", "username"} {
+		if set[f] != "" && !contains(eventFlagSources[f], o.source) {
+			return fmt.Errorf("--%s does not apply to %s events (it applies to: %s)", f, o.source, strings.Join(eventFlagSources[f], ", "))
+		}
+	}
+	if o.band != "" && !contains(rrmBands, o.band) {
+		return fmt.Errorf("invalid --band %q (valid: %s)", o.band, strings.Join(rrmBands, ", "))
+	}
+	if o.reason != "" {
+		if _, err := strconv.Atoi(o.reason); err != nil {
+			return fmt.Errorf("invalid --reason %q (expected a numeric 802.11 reason code)", o.reason)
+		}
+	}
+	return nil
+}
+
 func listEvents(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
 	if !contains(eventSources, o.source) {
 		return nil, fmt.Errorf("invalid --source %q (valid: %s)", o.source, strings.Join(eventSources, ", "))
+	}
+	if err := checkEventFlags(o); err != nil {
+		return nil, err
+	}
+	srt, err := o.searchSort()
+	if err != nil {
+		return nil, err
 	}
 	cl, err := a.client()
 	if err != nil {
@@ -176,38 +283,90 @@ func listEvents(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, er
 	if err != nil {
 		return nil, err
 	}
-	if o.source == "system" && mac != nil {
-		return nil, fmt.Errorf("--device does not apply to system events")
-	}
-	w, err := timeWindow(o.duration)
+	clientMAC, err := normMAC("client", o.clientMAC)
 	if err != nil {
 		return nil, err
 	}
-	typ, srt := client.Ptr(o.eventType), client.Ptr(newestFirst)
+	w, err := o.window()
+	if err != nil {
+		return nil, err
+	}
+	typ, text, ssid, user := client.Ptr(o.eventType), client.Ptr(o.text), client.Ptr(o.ssid), client.Ptr(o.username)
+	// keep is a local filter, for the filters an endpoint does not support.
+	var keep func(json.RawMessage) bool
 	var fetch func(ctx context.Context, limit int, after *string) (client.Raw, error)
 	switch {
 	case o.source == "device" && hasSite:
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsDevices], error) {
-				return cl.SDK.SitesDevices().SearchSiteDeviceEvents(ctx, site, mac, nil, nil, typ, nil, nil, &limit, w.start, w.end, nil, srt, after)
+				return cl.SDK.SitesDevices().SearchSiteDeviceEvents(ctx, site, mac, nil, text, typ, nil, nil, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
 	case o.source == "device":
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseDeviceEventsSearch], error) {
-				return cl.SDK.OrgsDevices().SearchOrgDeviceEvents(ctx, org, mac, nil, nil, nil, typ, nil, nil, &limit, w.start, w.end, nil, srt, after)
-			})
-		}
-	case o.source == "client" && hasSite:
-		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
-			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsSearch], error) {
-				return cl.SDK.SitesClientsWireless().SearchSiteWirelessClientEvents(ctx, site, typ, nil, nil, mac, nil, nil, nil, nil, &limit, w.start, w.end, nil, srt, after)
+				return cl.SDK.OrgsDevices().SearchOrgDeviceEvents(ctx, org, mac, nil, nil, text, typ, nil, nil, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
 	case o.source == "client":
+		// The client event searches have no client MAC filter.
+		if clientMAC != nil {
+			keep = func(it json.RawMessage) bool {
+				m := output.Decode(it)
+				for _, k := range []string{"mac", "client_mac"} {
+					if cache.NormalizeMAC(output.Text(m[k])) == *clientMAC {
+						return true
+					}
+				}
+				return false
+			}
+		}
+		if hasSite {
+			var reason *int
+			if o.reason != "" {
+				n, _ := strconv.Atoi(o.reason)
+				reason = &n
+			}
+			var band *models.Dot11BandEnum
+			if o.band != "" {
+				b := models.Dot11BandEnum(o.band)
+				band = &b
+			}
+			fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsSearch], error) {
+					return cl.SDK.SitesClientsWireless().SearchSiteWirelessClientEvents(ctx, site, typ, reason, ssid, mac, nil, band, nil, nil, &limit, w.start, w.end, nil, srt, after)
+				})
+			}
+		} else {
+			reason, band := client.Ptr(o.reason), client.Ptr(o.band)
+			fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsSearch], error) {
+					return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClientEvents(ctx, org, typ, reason, ssid, mac, nil, nil, band, nil, nil, w.start, w.end, nil, srt, &limit, after)
+				})
+			}
+		}
+	case o.source == "nac" && hasSite:
 		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
-			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsSearch], error) {
-				return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClientEvents(ctx, org, typ, nil, nil, mac, nil, nil, nil, nil, nil, w.start, w.end, nil, srt, &limit, after)
+			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsNacClientSearch], error) {
+				return cl.SDK.SitesClientsNAC().SearchSiteNacClientEvents(ctx, site, typ, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, ssid, user, mac, nil, clientMAC, nil, text, nil, nil, w.start, w.end, nil, &limit, srt, after)
+			})
+		}
+	case o.source == "nac":
+		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseEventsNacClientSearch], error) {
+				return cl.SDK.OrgsClientsNAC().SearchOrgNacClientEvents(ctx, org, typ, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, ssid, user, nil, mac, nil, clientMAC, nil, text, nil, nil, &limit, w.start, w.end, nil, srt, after)
+			})
+		}
+	case o.source == "wan" && hasSite:
+		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchEventsWanClient], error) {
+				return cl.SDK.SitesClientsWan().SearchSiteWanClientEvents(ctx, site, typ, clientMAC, nil, nil, nil, nil, &limit, w.start, w.end, nil, srt, after)
+			})
+		}
+	case o.source == "wan":
+		fetch = func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchEventsWanClient], error) {
+				return cl.SDK.OrgsClientsWan().SearchOrgWanClientEvents(ctx, org, typ, clientMAC, nil, nil, nil, nil, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
 	case hasSite: // system
@@ -222,16 +381,18 @@ func listEvents(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, er
 				return cl.SDK.OrgsEvents().SearchOrgSystemEvents(ctx, org, &limit, w.start, w.end, nil, srt, after)
 			})
 		}
+		if o.eventType != "" {
+			keep = func(it json.RawMessage) bool {
+				return strings.EqualFold(output.Text(output.Decode(it)["type"]), o.eventType)
+			}
+		}
 	}
-	if o.source != "system" || hasSite || o.eventType == "" {
+	if keep == nil {
 		return client.SearchAll(ctx, o.limit, fetch)
 	}
-	// Org system events have no server-side type filter: filter locally and
-	// apply --limit to the matches, reading further pages until enough
-	// matches are found or the window is exhausted.
-	return client.SearchFiltered(ctx, o.limit, func(it json.RawMessage) bool {
-		return strings.EqualFold(output.Text(output.Decode(it)["type"]), o.eventType)
-	}, fetch)
+	// Filter locally and apply --limit to the matches, reading further pages
+	// until enough matches are found or the window is exhausted.
+	return client.SearchFiltered(ctx, o.limit, keep, fetch)
 }
 
 // ---- SLEs -----------------------------------------------------------------
@@ -287,7 +448,7 @@ func slesResource() *resource {
 		FlagValues: map[string][]string{"sle": sleKinds},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.sle, "sle", "wifi", "SLE family: wifi, wired, wan")
-			fs.StringVar(&o.duration, "duration", "1d", "time window (e.g. 1h, 1d, 7d)")
+			addWindowFlags(fs, o, "1d", "time window")
 		},
 		EnrichAlways: true,
 		Enrich:       addSiteNames,
@@ -303,7 +464,7 @@ func slesResource() *resource {
 			if err != nil {
 				return nil, err
 			}
-			w, err := timeWindow(o.duration)
+			w, err := o.window()
 			if err != nil {
 				return nil, err
 			}
@@ -579,7 +740,7 @@ func rrmEventsResource() *resource {
 		FlagValues:   map[string][]string{"band": rrmBands},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.band, "band", "", "only this band: 24, 5, 6")
-			fs.StringVar(&o.duration, "duration", "1d", "time window (e.g. 1h, 1d, 7d)")
+			addWindowFlags(fs, o, "1d", "time window")
 		},
 		List: func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
 			if o.band != "" && !contains(rrmBands, o.band) {
@@ -593,7 +754,7 @@ func rrmEventsResource() *resource {
 			if err != nil {
 				return nil, err
 			}
-			w, err := timeWindow(o.duration)
+			w, err := o.window()
 			if err != nil {
 				return nil, err
 			}

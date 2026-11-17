@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/spf13/pflag"
 	"github.com/tmunzer/mistapi-go/mistapi/models"
 
 	"github.com/tmunzer-AIDE/mistctl/internal/cache"
@@ -34,6 +35,8 @@ type configSpec struct {
 	org            pager
 	site           pager
 	siteUnpaged    bool // the site endpoint returns everything at once
+	// list optionally replaces org/site paging (e.g. several calls merged).
+	list func(ctx context.Context, a *app, cl *client.Client, max int) ([]json.RawMessage, error)
 	// details optionally replaces the listed object in `describe` (e.g. a
 	// GET by ID that returns more fields, or related objects).
 	details func(ctx context.Context, a *app, cl *client.Client, item json.RawMessage) (json.RawMessage, error)
@@ -95,6 +98,9 @@ func listConfig(ctx context.Context, a *app, s configSpec, max int) ([]json.RawM
 	cl, err := a.client()
 	if err != nil {
 		return nil, err
+	}
+	if s.list != nil {
+		return s.list(ctx, a, cl, max)
 	}
 	org, site, hasSite, err := a.scope(ctx, s.name, s.scope)
 	if err != nil {
@@ -539,7 +545,7 @@ func listSiteMaps(ctx context.Context, cl *client.Client, site uuid.UUID, mapsta
 }
 
 func mapsResource() *resource {
-	return configResource(configSpec{
+	r := configResource(configSpec{
 		name: "maps", singular: "map", aliases: []string{"floorplans", "floorplan"},
 		short:    "Floor plans / maps of a site",
 		scope:    "site",
@@ -559,6 +565,43 @@ func mapsResource() *resource {
 			})
 		},
 	})
+	r.Flags = func(fs *pflag.FlagSet, o *listOpts) {
+		fs.StringVar(&o.mapstack, "mapstack", "", "only the maps (floors) of this map stack (name or ID)")
+	}
+	list := r.List
+	r.List = func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+		if o.mapstack == "" {
+			return list(ctx, a, o)
+		}
+		cl, err := a.client()
+		if err != nil {
+			return nil, err
+		}
+		_, site, _, err := a.scope(ctx, "maps", "site")
+		if err != nil {
+			return nil, err
+		}
+		id, ok := client.ParseUUID(o.mapstack)
+		if !ok {
+			stacks, err := client.ListAll(ctx, 0, func(ctx context.Context, limit, page int) (client.Raw, error) {
+				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[[]models.MapstackResponse], error) {
+					return cl.SDK.SitesMapStacks().ListSiteMapStacks(ctx, site, &limit, &page, nil)
+				})
+			})
+			if err != nil {
+				return nil, err
+			}
+			st, err := pickOne(stacks, o.mapstack, []string{"name", "id"}, "mapstack")
+			if err != nil {
+				return nil, err
+			}
+			if id, ok = client.ParseUUID(output.Text(output.Decode(st)["id"])); !ok {
+				return nil, fmt.Errorf("mapstack %q has no ID", o.mapstack)
+			}
+		}
+		return listSiteMaps(ctx, cl, site, &id, o.limit)
+	}
+	return r
 }
 
 func mapstacksResource() *resource {

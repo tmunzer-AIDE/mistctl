@@ -193,13 +193,25 @@ func bgpPeersResource() *resource {
 			output.Col("SITE", "site_name", "site_id").AsWide(),
 		},
 		MatchKeys:    []string{"device_name", "mac", "neighbor"},
+		FlagValues:   map[string][]string{"up": {"true", "false"}},
 		EnrichAlways: true,
 		Enrich:       addDeviceNameFrom("mac"),
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.device, "device", "", "only peers of this device (name, ID or MAC)")
 			fs.StringVar(&o.vrf, "vrf", "", "only peers in this VRF")
+			fs.StringVar(&o.up, "up", "", "only peers that are up (true) or down (false); applied locally")
+			fs.StringVar(&o.neighbor, "neighbor", "", "only this neighbor IP; applied locally")
+			addTimeBounds(fs, o)
 		},
 		List: func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+			keep, err := peerFilter(o, "neighbor")
+			if err != nil {
+				return nil, err
+			}
+			w, err := o.boundsWindow()
+			if err != nil {
+				return nil, err
+			}
 			cl, err := a.client()
 			if err != nil {
 				return nil, err
@@ -213,12 +225,12 @@ func bgpPeersResource() *resource {
 				return nil, err
 			}
 			vrf := client.Ptr(o.vrf)
-			return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+			return client.SearchFiltered(ctx, o.limit, keep, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseSearchBgps], error) {
 					if hasSite {
-						return cl.SDK.SitesStatsBGPPeers().SearchSiteBgpStats(ctx, site, mac, nil, vrf, &limit, nil, nil, nil, nil, after)
+						return cl.SDK.SitesStatsBGPPeers().SearchSiteBgpStats(ctx, site, mac, nil, vrf, &limit, w.start, w.end, nil, nil, after)
 					}
-					return cl.SDK.OrgsStatsBGPPeers().SearchOrgBgpStats(ctx, org, mac, nil, nil, vrf, &limit, nil, nil, nil, nil, after)
+					return cl.SDK.OrgsStatsBGPPeers().SearchOrgBgpStats(ctx, org, mac, nil, nil, vrf, &limit, w.start, w.end, nil, nil, after)
 				})
 			})
 		},
@@ -244,13 +256,25 @@ func ospfPeersResource() *resource {
 			output.Col("SITE", "site_name", "site_id").AsWide(),
 		},
 		MatchKeys:    []string{"device_name", "mac", "peer_ip", "neighbor_id"},
+		FlagValues:   map[string][]string{"up": {"true", "false"}},
 		EnrichAlways: true,
 		Enrich:       addDeviceNameFrom("mac"),
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.device, "device", "", "only peers of this device (name, ID or MAC)")
 			fs.StringVar(&o.vrf, "vrf", "", "only peers in this VRF")
+			fs.StringVar(&o.up, "up", "", "only peers that are up (true) or down (false); applied locally")
+			fs.StringVar(&o.peer, "peer", "", "only this peer IP")
+			addTimeBounds(fs, o)
 		},
 		List: func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+			keep, err := peerFilter(o, "")
+			if err != nil {
+				return nil, err
+			}
+			w, err := o.boundsWindow()
+			if err != nil {
+				return nil, err
+			}
 			cl, err := a.client()
 			if err != nil {
 				return nil, err
@@ -264,16 +288,56 @@ func ospfPeersResource() *resource {
 				return nil, err
 			}
 			vrf := client.Ptr(o.vrf)
-			return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+			peer := client.Ptr(o.peer)
+			return client.SearchFiltered(ctx, o.limit, keep, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
 				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.OspfPeerStatsSearchResult], error) {
 					if hasSite {
-						return cl.SDK.SitesStatsOspf().SearchSiteOspfStats(ctx, site, mac, vrf, nil, nil, nil, &limit, nil, after)
+						return cl.SDK.SitesStatsOspf().SearchSiteOspfStats(ctx, site, mac, vrf, peer, w.start, w.end, &limit, nil, after)
 					}
-					return cl.SDK.OrgsStatsOspf().SearchOrgOspfStats(ctx, org, nil, mac, vrf, nil, nil, nil, &limit, nil, after)
+					return cl.SDK.OrgsStatsOspf().SearchOrgOspfStats(ctx, org, nil, mac, vrf, peer, w.start, w.end, &limit, nil, after)
 				})
 			})
 		},
 	}
+}
+
+// addTimeBounds registers --start and --end for stats searches that accept
+// a time range but default to the current state.
+func addTimeBounds(fs *pflag.FlagSet, o *listOpts) {
+	fs.StringVar(&o.start, "start", "", "start of a time range (epoch seconds, RFC 3339 or YYYY-MM-DD[THH:MM]); default: current state")
+	fs.StringVar(&o.end, "end", "", "end of the time range (default: --start plus 1d, or now)")
+}
+
+// boundsWindow is the window of --start/--end, or no window at all.
+func (o *listOpts) boundsWindow() (window, error) {
+	if o.start == "" && o.end == "" {
+		return window{}, nil
+	}
+	if o.duration == "" {
+		o.duration = "1d"
+	}
+	return o.window()
+}
+
+// peerFilter is the local filter of --up and of the neighbor IP field
+// (when key is set) for BGP and OSPF peers.
+func peerFilter(o *listOpts, key string) (func(json.RawMessage) bool, error) {
+	up, err := parseTriBool("up", o.up)
+	if err != nil {
+		return nil, err
+	}
+	if up == nil && (key == "" || o.neighbor == "") {
+		return nil, nil
+	}
+	return func(it json.RawMessage) bool {
+		m := output.Decode(it)
+		if up != nil {
+			if v, ok := m["up"].(bool); !ok || v != *up {
+				return false
+			}
+		}
+		return key == "" || o.neighbor == "" || output.Text(m[key]) == o.neighbor
+	}, nil
 }
 
 // ---- ports ----------------------------------------------------------------
@@ -308,13 +372,22 @@ func portsResource() *resource {
 		EnrichAlways: true,
 		Enrich:       addDeviceNameFrom("mac"),
 		FlagValues: map[string][]string{
-			"type":   portDeviceTypes,
-			"status": {"up", "down"},
+			"type":       portDeviceTypes,
+			"status":     {"up", "down"},
+			"poe":        {"true", "false"},
+			"auth-state": portAuthStates,
+			"stp-state":  portStpStates,
 		},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.device, "device", "", "only ports of this device (name, ID or MAC)")
 			fs.StringVar(&o.devType, "type", "all", "device type: all, switch, gateway")
 			fs.StringVar(&o.status, "status", "", "filter by link status: up, down")
+			fs.StringVar(&o.port, "port", "", "only this port ID, e.g. ge-0/0/1")
+			fs.StringVar(&o.neighbor, "neighbor", "", "only ports whose LLDP neighbor has this system name")
+			fs.IntVar(&o.speed, "speed", -1, "only ports at this speed in Mbps (0 matches ports with no link speed)")
+			fs.StringVar(&o.poe, "poe", "", "only ports delivering PoE (true) or not (false)")
+			fs.StringVar(&o.authState, "auth-state", "", "802.1X state: "+strings.Join(portAuthStates, ", "))
+			fs.StringVar(&o.stp, "stp-state", "", "STP state: "+strings.Join(portStpStates, ", "))
 		},
 		List: func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
 			if !contains(portDeviceTypes, o.devType) {
@@ -333,11 +406,31 @@ func portsResource() *resource {
 			if err != nil {
 				return nil, err
 			}
-			var typ *string
+			q := portQuery{up: up, mac: mac, portID: client.Ptr(o.port), neighbor: client.Ptr(o.neighbor)}
 			if o.devType != "all" {
-				typ = &o.devType
+				q.typ = &o.devType
 			}
-			return searchPorts(ctx, a, typ, up, mac, nil, o.limit)
+			if o.speed >= 0 {
+				q.speed = &o.speed
+			}
+			if q.poe, err = parseTriBool("poe", o.poe); err != nil {
+				return nil, err
+			}
+			if o.authState != "" {
+				if !contains(portAuthStates, o.authState) {
+					return nil, fmt.Errorf("invalid --auth-state %q (valid: %s)", o.authState, strings.Join(portAuthStates, ", "))
+				}
+				v := models.PortAuthStateEnum(o.authState)
+				q.auth = &v
+			}
+			if o.stp != "" {
+				if !contains(portStpStates, o.stp) {
+					return nil, fmt.Errorf("invalid --stp-state %q (valid: %s)", o.stp, strings.Join(portStpStates, ", "))
+				}
+				v := models.PortStpStateEnum(o.stp)
+				q.stp = &v
+			}
+			return searchPorts(ctx, a, q, o.limit)
 		},
 		DescribeFlags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.device, "device", "", "device the port belongs to (name, ID or MAC); instead of the DEVICE: prefix")
@@ -356,8 +449,24 @@ in the current scope (site or org).`,
 	}
 }
 
+var (
+	portAuthStates = []string{"authenticated", "authenticating", "held", "init"}
+	portStpStates  = []string{"blocking", "disabled", "forwarding", "learning", "listening"}
+)
+
+// portQuery holds the filters of the port stats search. A non-nil false or
+// zero value is sent as is.
+type portQuery struct {
+	typ, mac, portID, neighbor *string
+	up, poe                    *bool
+	speed                      *int
+	auth                       *models.PortAuthStateEnum
+	stp                        *models.PortStpStateEnum
+}
+
 // searchPorts runs the port stats search at site or org scope.
-func searchPorts(ctx context.Context, a *app, typ *string, up *bool, mac, portID *string, max int) ([]json.RawMessage, error) {
+func searchPorts(ctx context.Context, a *app, q portQuery, max int) ([]json.RawMessage, error) {
+	typ, up, mac, portID := q.typ, q.up, q.mac, q.portID
 	cl, err := a.client()
 	if err != nil {
 		return nil, err
@@ -374,11 +483,11 @@ func searchPorts(ctx context.Context, a *app, typ *string, up *bool, mac, portID
 				st = &v
 			}
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseSwitchPortSearch], error) {
-				return cl.SDK.SitesStatsPorts().SearchSiteSwOrGwPorts(ctx, site, st, nil, nil, nil, nil, nil, mac, nil, nil, nil, nil, nil, nil, nil, portID, nil, nil, nil, nil, up, nil, &limit, nil, after)
+				return cl.SDK.SitesStatsPorts().SearchSiteSwOrGwPorts(ctx, site, st, q.auth, nil, nil, nil, nil, mac, nil, nil, q.neighbor, nil, nil, q.poe, nil, portID, nil, q.speed, q.stp, nil, up, nil, &limit, nil, after)
 			})
 		}
 		return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponsePortStatsSearch], error) {
-			return cl.SDK.OrgsStatsPorts().SearchOrgSwOrGwPorts(ctx, org, typ, nil, nil, nil, nil, nil, mac, nil, nil, nil, nil, nil, nil, nil, portID, nil, nil, nil, nil, up, nil, &limit, nil, after)
+			return cl.SDK.OrgsStatsPorts().SearchOrgSwOrGwPorts(ctx, org, typ, q.auth, nil, nil, nil, nil, mac, nil, nil, q.neighbor, nil, nil, q.poe, nil, portID, nil, q.speed, q.stp, nil, up, nil, &limit, nil, after)
 		})
 	})
 }
@@ -401,7 +510,7 @@ func describePort(ctx context.Context, a *app, name string) (*described, error) 
 	if err != nil {
 		return nil, err
 	}
-	items, err := searchPorts(ctx, a, nil, nil, mac, &port, 0)
+	items, err := searchPorts(ctx, a, portQuery{mac: mac, portID: &port}, 0)
 	if err != nil {
 		return nil, err
 	}

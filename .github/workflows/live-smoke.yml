@@ -1,0 +1,29 @@
+name: live-smoke
+
+# Optional read-only smoke tests against a live Mist org. Manual only: they
+# spend API budget and need these repository secrets:
+#   MISTCTL_LIVE_TOKEN  read-only (Observer) API token
+#   MISTCTL_LIVE_CLOUD  cloud short name or API host, e.g. global01
+#   MISTCTL_LIVE_ORG    org name or ID
+#   MISTCTL_LIVE_SITE   optional: a site with more than 100 clients
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Live smoke tests (read-only)
+        env:
+          MISTCTL_LIVE_TOKEN: ${{ secrets.MISTCTL_LIVE_TOKEN }}
+          MISTCTL_LIVE_CLOUD: ${{ secrets.MISTCTL_LIVE_CLOUD }}
+          MISTCTL_LIVE_ORG: ${{ secrets.MISTCTL_LIVE_ORG }}
+          MISTCTL_LIVE_SITE: ${{ secrets.MISTCTL_LIVE_SITE }}
+        run: go test -tags live -run Live -v ./internal/cli/
