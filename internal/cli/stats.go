@@ -329,14 +329,6 @@ func portsResource() *resource {
 			default:
 				return nil, fmt.Errorf("invalid --status %q (valid: up, down)", o.status)
 			}
-			cl, err := a.client()
-			if err != nil {
-				return nil, err
-			}
-			org, site, hasSite, err := a.scope(ctx, "ports", "org/site")
-			if err != nil {
-				return nil, err
-			}
 			mac, err := a.deviceMAC(ctx, o.device)
 			if err != nil {
 				return nil, err
@@ -345,23 +337,126 @@ func portsResource() *resource {
 			if o.devType != "all" {
 				typ = &o.devType
 			}
-			return client.SearchAll(ctx, o.limit, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
-				if hasSite {
-					var st *models.SearchOrgSwOrGwPortsTypeEnum
-					if typ != nil {
-						v := models.SearchOrgSwOrGwPortsTypeEnum(*typ)
-						st = &v
-					}
-					return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseSwitchPortSearch], error) {
-						return cl.SDK.SitesStatsPorts().SearchSiteSwOrGwPorts(ctx, site, st, nil, nil, nil, nil, nil, mac, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, up, nil, &limit, nil, after)
-					})
-				}
-				return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponsePortStatsSearch], error) {
-					return cl.SDK.OrgsStatsPorts().SearchOrgSwOrGwPorts(ctx, org, typ, nil, nil, nil, nil, nil, mac, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, up, nil, &limit, nil, after)
-				})
-			})
+			return searchPorts(ctx, a, typ, up, mac, nil, o.limit)
 		},
+		DescribeFlags: func(fs *pflag.FlagSet, o *listOpts) {
+			fs.StringVar(&o.device, "device", "", "device of the port (name, ID or MAC); or use DEVICE:PORT")
+		},
+		Describe: describePort,
 	}
+}
+
+// searchPorts runs the port stats search at site or org scope.
+func searchPorts(ctx context.Context, a *app, typ *string, up *bool, mac, portID *string, max int) ([]json.RawMessage, error) {
+	cl, err := a.client()
+	if err != nil {
+		return nil, err
+	}
+	org, site, hasSite, err := a.scope(ctx, "ports", "org/site")
+	if err != nil {
+		return nil, err
+	}
+	return client.SearchAll(ctx, max, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+		if hasSite {
+			var st *models.SearchOrgSwOrGwPortsTypeEnum
+			if typ != nil {
+				v := models.SearchOrgSwOrGwPortsTypeEnum(*typ)
+				st = &v
+			}
+			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseSwitchPortSearch], error) {
+				return cl.SDK.SitesStatsPorts().SearchSiteSwOrGwPorts(ctx, site, st, nil, nil, nil, nil, nil, mac, nil, nil, nil, nil, nil, nil, nil, portID, nil, nil, nil, nil, up, nil, &limit, nil, after)
+			})
+		}
+		return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponsePortStatsSearch], error) {
+			return cl.SDK.OrgsStatsPorts().SearchOrgSwOrGwPorts(ctx, org, typ, nil, nil, nil, nil, nil, mac, nil, nil, nil, nil, nil, nil, nil, portID, nil, nil, nil, nil, up, nil, &limit, nil, after)
+		})
+	})
+}
+
+// describePort shows every stat of one port. NAME is DEVICE:PORT (DEVICE
+// being a name, ID or MAC), or just PORT with --device, or PORT alone when
+// only one device in scope has it.
+func describePort(ctx context.Context, a *app, name string) (*described, error) {
+	device, port := "", name
+	if a.describeOpts != nil {
+		device = a.describeOpts.device
+	}
+	if i := strings.LastIndex(name, ":"); i > 0 && device == "" {
+		device, port = name[:i], name[i+1:]
+	}
+	if port == "" {
+		return nil, fmt.Errorf("missing port in %q (use DEVICE:PORT, e.g. sw-core:ge-0/0/1)", name)
+	}
+	mac, err := a.deviceMAC(ctx, device)
+	if err != nil {
+		return nil, err
+	}
+	items, err := searchPorts(ctx, a, nil, nil, mac, &port, 0)
+	if err != nil {
+		return nil, err
+	}
+	items = addDeviceNameFrom("mac")(ctx, a, items)
+	switch len(items) {
+	case 0:
+		if device != "" {
+			return nil, fmt.Errorf("port %q not found on %s", port, device)
+		}
+		return nil, fmt.Errorf("port %q not found", port)
+	case 1:
+	default:
+		var devs []string
+		for _, it := range items {
+			m := output.Decode(it)
+			d := output.Text(m["device_name"])
+			if d == "" {
+				d = output.Text(m["mac"])
+			}
+			devs = append(devs, d)
+		}
+		return nil, fmt.Errorf("port %q exists on %d devices (%s); use DEVICE:PORT or --device", port, len(items), strings.Join(devs, ", "))
+	}
+	m := output.Decode(items[0])
+	dev := output.Text(m["mac"])
+	if n := output.Text(m["device_name"]); n != "" {
+		dev = n + " (" + dev + ")"
+	}
+	site := ""
+	if id := output.Text(m["site_id"]); id != "" {
+		site = siteLabel(a.siteNames(ctx), id)
+	}
+	t := func(k string) string { return output.Text(m[k]) }
+	pair := func(a, b string) string {
+		if a == "" && b == "" {
+			return ""
+		}
+		return orDash(a) + " / " + orDash(b)
+	}
+	return &described{
+		Header: [][2]string{
+			{"Device", dev},
+			{"Port", t("port_id")},
+			{"Site", site},
+			{"Type", t("type")},
+			{"Up", t("up")},
+			{"Disabled", t("disabled")},
+			{"Speed", t("speed")},
+			{"Full duplex", t("full_duplex")},
+			{"Usage", t("port_usage")},
+			{"Uplink", t("uplink")},
+			{"Neighbor", pair(t("neighbor_system_name"), t("neighbor_port_desc"))},
+			{"Neighbor MAC", t("neighbor_mac")},
+			{"Auth", t("auth_state")},
+			{"STP", pair(t("stp_state"), t("stp_role"))},
+			{"PoE", pair(t("poe_on"), t("power_draw"))},
+			{"MACs learned", t("mac_count")},
+			{"RX / TX bps", pair(t("rx_bps"), t("tx_bps"))},
+			{"RX / TX bytes", pair(t("rx_bytes"), t("tx_bytes"))},
+			{"RX / TX errors", pair(t("rx_errors"), t("tx_errors"))},
+			{"Transceiver", strings.TrimSpace(t("xcvr_model") + " " + t("xcvr_part_number") + " " + t("xcvr_serial"))},
+			{"Last flapped", ageOf(m["last_flapped"])},
+		},
+		Doc: items[0],
+	}, nil
 }
 
 // ---- zones ----------------------------------------------------------------

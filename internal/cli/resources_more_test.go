@@ -141,6 +141,15 @@ func (m *moreMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if q.Get("up") == "false" {
 			res = res[1:]
 		}
+		if pid := q.Get("port_id"); pid != "" {
+			var keep []string
+			for _, r := range res {
+				if strings.Contains(r, `"port_id":"`+pid+`"`) {
+					keep = append(keep, r)
+				}
+			}
+			res = keep
+		}
 		fmt.Fprintf(w, `{"results":[%s],"total":%d,"limit":1000}`, strings.Join(res, ","), len(res))
 	case hq + "/stats/zones":
 		fmt.Fprintf(w, `[{"id":"%s","name":"Lobby","num_clients":4,"num_assets":1,"map_id":"%s"}]`, zoneID, mapID)
@@ -334,6 +343,16 @@ func TestPeersPortsZones(t *testing.T) {
 	out = run(t, "get", "ports", "--site", "HQ", "--status", "down")
 	assertNotContains(t, out, "ge-0/0/1")
 	assertContains(t, run(t, "get", "port", "ge-0/0/1", "--site", "HQ"), "ge-0/0/1")
+	out = run(t, "describe", "port", "sw-core:ge-0/0/1", "--site", "HQ")
+	assertContains(t, out, "Device:", "sw-core (5c5b35000002)", "Port:", "ge-0/0/1", "Speed:", "1000", "Neighbor:", "ap-lobby", "poe_on: true")
+	assertContains(t, run(t, "describe", "port", "ge-0/0/1", "--device", "5c:5b:35:00:00:02", "--site", "HQ"), "ge-0/0/1")
+	c = fake.called("/api/v1/sites/" + siteHQ + "/stats/ports/search")
+	if last := c[len(c)-1]; !strings.Contains(last, "port_id=ge-0%2F0%2F1") || !strings.Contains(last, "mac=5c5b35000002") {
+		t.Errorf("describe port filters not passed: %s", last)
+	}
+	if _, err := runErr("describe", "port", "sw-core:ge-9/9/9", "--site", "HQ"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected port not found, got %v", err)
+	}
 	assertContains(t, run(t, "get", "zones", "--site", "HQ"), "Lobby", "4")
 	assertContains(t, run(t, "describe", "zone", "lobby", "--site", "HQ"), "Name:", "Lobby", "clients:")
 }

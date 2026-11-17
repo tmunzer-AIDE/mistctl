@@ -92,7 +92,7 @@ mistctl get rrm --site HQ --band 5
 | `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current` (one row per band: APs per channel/power, noise, neighbors; `-o wide` adds the RF template limits, `-o json` keeps any per-AP plan under `aps`), `/sites/{id}/rrm/events` |
 | `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`) |
 | `bgp-peers`, `ospf-peers` | `bgp`, `ospf` | org or site | `/stats/bgp_peers/search`, `/stats/ospf_peers/search` |
-| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down` |
+| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port |
 | `zones` | | site | `/sites/{id}/stats/zones` |
 
 Objects can be referred to by name, ID, or (devices and clients) MAC address in
