@@ -73,7 +73,11 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 		r.Flags(cmd.Flags(), o)
 	}
 	if f := cmd.Flags().Lookup("type"); f != nil {
-		_ = cmd.RegisterFlagCompletionFunc("type", fixedCompletion(deviceTypes...))
+		types := deviceTypes
+		if r.Name == "clients" {
+			types = clientTypes
+		}
+		_ = cmd.RegisterFlagCompletionFunc("type", fixedCompletion(types...))
 	}
 	if f := cmd.Flags().Lookup("status"); f != nil {
 		_ = cmd.RegisterFlagCompletionFunc("status", fixedCompletion("connected", "disconnected"))

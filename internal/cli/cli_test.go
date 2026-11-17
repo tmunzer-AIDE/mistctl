@@ -85,6 +85,10 @@ func (f *fakeMist) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case p == "/api/v1/sites/"+siteHQ+"/stats/clients/aabbccddeeff":
 		fmt.Fprint(w, `{"mac":"aabbccddeeff","hostname":"laptop","ip":"10.0.1.5","ssid":"Corp","rssi":-55,"uptime":3600}`)
 	case p == "/api/v1/orgs/"+orgID+"/clients/search":
+		if q.Get("mac") != "" && q.Get("mac") != "aabbccddeeff" {
+			fmt.Fprint(w, `{"results":[],"limit":1,"total":0}`)
+			return
+		}
 		if q.Get("mac") != "" {
 			fmt.Fprintf(w, `{"results":[{"mac":"aabbccddeeff","last_hostname":"laptop","site_id":"%s"}],"limit":1,"total":1}`, siteHQ)
 			return
@@ -335,10 +339,22 @@ func TestConfigCommands(t *testing.T) {
 	}
 }
 
-func TestWiredClients(t *testing.T) {
+func TestClientsWiredAndWireless(t *testing.T) {
 	setup(t)
-	out := run(t, "get", "wired-clients")
-	assertContains(t, out, "printer", "001122334455", "10.0.2.7", "sw-core", "ge-0/0/5", "20")
-	assertContains(t, run(t, "get", "wired", "--site", "HQ", "-o", "wide"), "printer", "authenticated", "HQ")
-	assertContains(t, run(t, "describe", "wired-client", "00:11:22:33:44:55"), "Hostname:", "printer", "Device:", "sw-core", "Port:", "ge-0/0/5")
+	out := run(t, "get", "clients", "--site", "HQ")
+	assertContains(t, out, "TYPE", "laptop", "wireless", "printer", "wired", "sw-core", "ge-0/0/5", "ap-lobby")
+	out = run(t, "get", "clients", "--type", "wired", "-o", "wide")
+	assertContains(t, out, "printer", "authenticated", "HQ")
+	if strings.Contains(out, "laptop") {
+		t.Errorf("--type wired returned wireless clients:\n%s", out)
+	}
+	out = run(t, "get", "clients", "--type", "wireless")
+	if strings.Contains(out, "printer") {
+		t.Errorf("--type wireless returned wired clients:\n%s", out)
+	}
+	assertContains(t, run(t, "describe", "client", "00:11:22:33:44:55"), "Type:", "wired", "Device:", "sw-core", "Port:", "ge-0/0/5")
+	if _, err := runErr("get", "clients", "--type", "bluetooth"); err == nil {
+		t.Error("expected invalid --type error")
+	}
+	assertContains(t, run(t, "__complete", "get", "clients", "--type", ""), "wireless", "wired")
 }
