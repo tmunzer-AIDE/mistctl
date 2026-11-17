@@ -1,7 +1,7 @@
 # mistctl developer and release tasks. Run `make help` for the list.
 #
-# Release targets drive the GitHub CLI (gh) logged in as the repository owner.
-# See RELEASING.md for what each secret is and where it comes from.
+# Release targets run on the maintainer's Mac with the GitHub CLI (gh) logged
+# in as the repository owner. See RELEASING.md.
 
 GORELEASER ?= goreleaser
 RELEASE := ./scripts/release.sh
@@ -9,8 +9,7 @@ RELEASE := ./scripts/release.sh
 .DEFAULT_GOAL := help
 
 .PHONY: help build test lint check snapshot \
-	release-doctor release-repos release-tokens release-secrets-macos \
-	release-secrets-windows release-setup release publish winget-pr
+	release-doctor release-repos release publish winget-pr
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -31,31 +30,20 @@ check: ## Validate the GoReleaser config
 	$(GORELEASER) check
 
 snapshot: ## Local release dry run into dist/ (no signing, nothing published)
-	$(GORELEASER) release --snapshot --clean --skip=sign,notarize,sbom
+	CODESIGN_IDENTITY= $(GORELEASER) release --snapshot --clean --skip=sign,notarize,sbom
 
 ## One-time release setup
 
-release-doctor: ## Show which repos and secrets are set up
+release-doctor: ## Check tools, signing identity, notary profile and repos
 	@$(RELEASE) doctor
 
 release-repos: ## Create homebrew-tap and scoop-bucket, fork winget-pkgs
 	@$(RELEASE) repos
 
-release-tokens: ## Create the two PATs in the browser and store them as secrets
-	@$(RELEASE) tokens
+## Releasing (on your Mac)
 
-release-secrets-macos: ## Store Apple secrets (prompts; or pass P12= P8= KEY_ID= ISSUER_ID=)
-	@P12="$(P12)" P8="$(P8)" KEY_ID="$(KEY_ID)" ISSUER_ID="$(ISSUER_ID)" $(RELEASE) secrets-macos
-
-release-secrets-windows: ## Store Windows signing secrets (prompts; or pass PFX=)
-	@PFX="$(PFX)" $(RELEASE) secrets-windows
-
-release-setup: release-repos release-tokens release-doctor ## Repos + tokens, then show what is left
-
-## Releasing
-
-release: ## Tag main as VERSION and push it (draft release): VERSION=v0.1.0
-	@$(RELEASE) tag "$(VERSION)"
+release: ## Test, tag, sign, notarize and create the draft release: VERSION=v0.1.0
+	@$(RELEASE) release "$(VERSION)"
 
 publish: ## Publish the draft release: VERSION=v0.1.0
 	@$(RELEASE) publish "$(VERSION)"

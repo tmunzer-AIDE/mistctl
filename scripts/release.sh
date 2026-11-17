@@ -1,22 +1,23 @@
 #!/bin/sh
-# Release setup and publishing helper, driven by the Makefile.
+# Release helper, driven by the Makefile. Releases are built, signed and
+# published from the maintainer's Mac, so the Apple signing identity and
+# notary credentials never leave the local keychain.
 #
 # Usage: scripts/release.sh <command> [args]
 #
 #   doctor                 show what is set up and what is missing
 #   repos                  create homebrew-tap and scoop-bucket, fork winget-pkgs
-#   tokens                 create the two PATs (browser) and store them as secrets
-#   secrets-macos          store the Apple signing and notarization secrets
-#   secrets-windows        store the Windows .pfx signing secrets
-#   tag <vX.Y.Z>           tag main and push the tag (starts the release workflow)
+#   release <vX.Y.Z>       test, tag, push the tag, then build, sign, notarize
+#                          and publish a draft release with GoReleaser
 #   publish <vX.Y.Z>       publish the draft GitHub release
 #   winget-pr <vX.Y.Z>     open the PR to microsoft/winget-pkgs
 #
-# Uses the GitHub CLI (gh) logged in as the repository owner. Secrets are read
-# from files or typed at a hidden prompt and sent straight to GitHub; nothing
-# is written to disk or echoed.
+# Settings come from the environment or from a git-ignored .release.env at the
+# repository root:
+#   CODESIGN_IDENTITY   "Developer ID Application: Name (TEAMID)" in the keychain
+#   NOTARY_PROFILE      notarytool keychain profile (xcrun notarytool store-credentials)
+# GitHub access uses the gh CLI login (gh auth token); no token is stored.
 set -eu
-
 OWNER=${OWNER:-tmunzer-AIDE}
 REPO=${REPO:-$OWNER/mistctl}
 TAP=$OWNER/homebrew-tap
@@ -25,6 +26,18 @@ WINGET_FORK=$OWNER/winget-pkgs
 WINGET_UPSTREAM=microsoft/winget-pkgs
 WINGET_ID=tmunzer-AIDE.mistctl
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+
+# Environment wins over .release.env.
+if [ -f "$ROOT/.release.env" ]; then
+  _id=${CODESIGN_IDENTITY:-} _np=${NOTARY_PROFILE:-}
+  # shellcheck disable=SC1091
+  . "$ROOT/.release.env"
+  CODESIGN_IDENTITY=${_id:-${CODESIGN_IDENTITY:-}}
+  NOTARY_PROFILE=${_np:-${NOTARY_PROFILE:-}}
+fi
+CODESIGN_IDENTITY=${CODESIGN_IDENTITY:-}
+NOTARY_PROFILE=${NOTARY_PROFILE:-}
+export CODESIGN_IDENTITY NOTARY_PROFILE
 
 die() { echo "error: $*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
@@ -46,10 +59,6 @@ need_gh() {
 
 repo_exists() { gh repo view "$1" >/dev/null 2>&1; }
 
-secret_names() { gh secret list -R "$REPO" --json name --jq '.[].name'; }
-
-has_secret() { printf '%s\n' "$SECRETS" | grep -qx "$1"; }
-
 version_arg() {
   [ $# -ge 1 ] && [ -n "$1" ] || die "VERSION is required, for example: make release VERSION=v0.1.0"
   printf '%s' "$1" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' ||
@@ -57,108 +66,48 @@ version_arg() {
   VERSION=$1
 }
 
-# Reads a file into a secret, base64-encoded on one line.
-set_secret_file() {
-  name=$1 file=$2
-  [ -f "$file" ] || die "$name: file not found: $file"
-  base64 <"$file" | tr -d '\n' | gh secret set "$name" -R "$REPO"
-}
+have() { command -v "$1" >/dev/null 2>&1; }
 
-# Value given in the environment, or typed at gh's hidden prompt.
-set_secret_value() {
-  name=$1 value=$2
-  if [ -n "$value" ]; then
-    printf '%s' "$value" | gh secret set "$name" -R "$REPO"
+# Prints problems with the local signing setup, one per line; empty if none.
+signing_problems() {
+  [ "$(uname -s)" = Darwin ] || { echo "releases must run on macOS (codesign, notarytool)"; return; }
+  if [ -z "$CODESIGN_IDENTITY" ]; then
+    echo "CODESIGN_IDENTITY is not set (environment or .release.env)"
+  elif ! security find-identity -v -p codesigning | grep -qF "$CODESIGN_IDENTITY"; then
+    echo "no valid code-signing identity matching '$CODESIGN_IDENTITY' in the keychain"
   else
-    say "$name:"
-    gh secret set "$name" -R "$REPO"
+    case "$CODESIGN_IDENTITY" in
+      *"Developer ID Application"*) ;;
+      *) security find-identity -v -p codesigning | grep -F "$CODESIGN_IDENTITY" | grep -q "Developer ID Application" ||
+        echo "'$CODESIGN_IDENTITY' is not a Developer ID Application identity" ;;
+    esac
   fi
-}
-
-# Normalizes a path typed or dropped into the terminal: surrounding quotes,
-# backslash-escaped spaces, and a leading ~ (zsh does not expand ~ in
-# make VAR=~/path arguments).
-clean_path() {
-  p=$1
-  case "$p" in
-    \"*\") p=${p#\"}; p=${p%\"} ;;
-    \'*\') p=${p#\'}; p=${p%\'} ;;
-  esac
-  p=$(printf '%s' "$p" | sed 's/\\ / /g; s/[[:space:]]*$//')
-  # shellcheck disable=SC2088 # matching a literal ~ on purpose
-  case "$p" in
-    "~") p=$HOME ;;
-    "~/"*) p=$HOME/${p#"~/"} ;;
-  esac
-  printf '%s' "$p"
-}
-
-# ask_file VAR "label": uses $VAR if set, otherwise prompts until the file exists.
-ask_file() {
-  var=$1 label=$2
-  eval "val=\${$var:-}"
-  while :; do
-    if [ -z "$val" ]; then
-      printf '%s (path, or drag the file here): ' "$label"
-      read -r val
-    fi
-    val=$(clean_path "$val")
-    [ -f "$val" ] && break
-    echo "  file not found: $val" >&2
-    val=
-  done
-  eval "$var=\$val"
-}
-
-# ask_value VAR "label" [default]: uses $VAR if set, otherwise prompts.
-ask_value() {
-  var=$1 label=$2 def=${3:-}
-  eval "val=\${$var:-}"
-  while [ -z "$val" ]; do
-    if [ -n "$def" ]; then
-      printf '%s [%s]: ' "$label" "$def"
-      read -r val
-      val=${val:-$def}
-    else
-      printf '%s: ' "$label"
-      read -r val
-    fi
-  done
-  eval "$var=\$val"
-}
-
-open_url() {
-  say "  $1"
-  if command -v open >/dev/null 2>&1; then
-    open "$1"
-  elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$1" >/dev/null 2>&1 || true
+  if [ -z "$NOTARY_PROFILE" ]; then
+    echo "NOTARY_PROFILE is not set (environment or .release.env)"
+  elif ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+    echo "notarytool profile '$NOTARY_PROFILE' does not work (xcrun notarytool store-credentials $NOTARY_PROFILE)"
   fi
 }
 
 cmd_doctor() {
   need_gh
-  SECRETS=$(secret_names)
+  say "Tools"
+  for t in go goreleaser syft gh; do
+    if have "$t"; then ok "$t"; else missing "$t (brew install $t)"; fi
+  done
+  if gh auth status 2>&1 | grep -q "'repo'"; then ok "gh token has the repo scope"; else missing "gh token lacks the repo scope (gh auth refresh -s repo)"; fi
+  say "macOS signing and notarization"
+  problems=$(signing_problems)
+  if [ -z "$problems" ]; then
+    ok "identity: $CODESIGN_IDENTITY"
+    ok "notary profile: $NOTARY_PROFILE"
+  else
+    printf '%s\n' "$problems" | while IFS= read -r line; do missing "$line"; done
+  fi
   say "Repositories"
   for r in "$TAP" "$BUCKET" "$WINGET_FORK"; do
     if repo_exists "$r"; then ok "$r"; else missing "$r (make release-repos)"; fi
   done
-  say "Package manager tokens"
-  for s in TAP_GITHUB_TOKEN WINGET_GITHUB_TOKEN; do
-    if has_secret "$s"; then ok "$s"; else missing "$s (make release-tokens)"; fi
-  done
-  say "macOS signing and notarization"
-  for s in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_ISSUER_ID MACOS_NOTARY_KEY_ID MACOS_NOTARY_KEY; do
-    if has_secret "$s"; then ok "$s"; else missing "$s (make release-secrets-macos)"; fi
-  done
-  say "Windows signing (optional)"
-  for s in WINDOWS_SIGN_PFX WINDOWS_SIGN_PASSWORD; do
-    if has_secret "$s"; then ok "$s"; else missing "$s (optional, make release-secrets-windows)"; fi
-  done
-  if has_secret TAP_GITHUB_TOKEN && ! has_secret MACOS_SIGN_P12; then
-    say ""
-    say "Note: the Homebrew cask is only published once MACOS_SIGN_P12 is set."
-  fi
 }
 
 create_package_repo() {
@@ -192,80 +141,65 @@ cmd_repos() {
   fi
 }
 
-cmd_tokens() {
-  need_gh
-  base=https://github.com/settings/personal-access-tokens/new
-  say "1/2 TAP_GITHUB_TOKEN: Homebrew tap and Scoop bucket."
-  say "    In the form, choose 'Only select repositories': homebrew-tap and scoop-bucket."
-  open_url "$base?name=mistctl+tap+and+bucket&description=GoReleaser+pushes+the+mistctl+cask+and+Scoop+manifest&target_name=$OWNER&expires_in=366&contents=write"
-  say "    Generate the token, copy it, then paste it below (input is hidden)."
-  gh secret set TAP_GITHUB_TOKEN -R "$REPO"
-  say ""
-  say "2/2 WINGET_GITHUB_TOKEN: winget-pkgs fork."
-  say "    In the form, choose 'Only select repositories': winget-pkgs."
-  open_url "$base?name=mistctl+winget+fork&description=GoReleaser+pushes+mistctl+winget+manifests+to+the+fork&target_name=$OWNER&expires_in=366&contents=write"
-  say "    Generate the token, copy it, then paste it below (input is hidden)."
-  gh secret set WINGET_GITHUB_TOKEN -R "$REPO"
-  say ""
-  say "Both tokens expire in a year: put a reminder in your calendar."
-}
-
-cmd_secrets_macos() {
-  say "Apple signing and notarization (see RELEASING.md, section 3)."
-  ask_file P12 "Developer ID Application .p12"
-  ask_file P8 "App Store Connect API key AuthKey_XXXX.p8"
-  # The key ID is in the .p8 file name (AuthKey_<KEYID>.p8).
-  guess=$(basename "$P8" | sed -n 's/^AuthKey_\([A-Za-z0-9]*\)\.p8$/\1/p')
-  ask_value KEY_ID "App Store Connect key ID" "$guess"
-  ask_value ISSUER_ID "App Store Connect issuer ID (Users and Access, Integrations)"
-  need_gh
-  set_secret_file MACOS_SIGN_P12 "$P12"
-  set_secret_value MACOS_SIGN_PASSWORD "${P12_PASSWORD:-}"
-  set_secret_value MACOS_NOTARY_ISSUER_ID "$ISSUER_ID"
-  set_secret_value MACOS_NOTARY_KEY_ID "$KEY_ID"
-  set_secret_file MACOS_NOTARY_KEY "$P8"
-  ok "macOS secrets stored"
-}
-
-cmd_secrets_windows() {
-  ask_file PFX "Code-signing .pfx"
-  need_gh
-  set_secret_file WINDOWS_SIGN_PFX "$PFX"
-  set_secret_value WINDOWS_SIGN_PASSWORD "${PFX_PASSWORD:-}"
-  ok "Windows secrets stored"
-}
-
-cmd_tag() {
+cmd_release() {
   version_arg "$@"
   need_gh
   cd "$ROOT"
+  for t in go goreleaser syft; do have "$t" || die "$t is required (brew install $t)"; done
+  problems=$(signing_problems)
+  [ -z "$problems" ] || die "macOS signing is not ready (make release-doctor):
+$problems"
   [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || die "check out main first"
   [ -z "$(git status --porcelain)" ] || die "the working tree has uncommitted changes"
   git fetch -q origin main --tags
   [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] ||
     die "main is not in sync with origin/main (git pull)"
+  if gh release view "$VERSION" -R "$REPO" >/dev/null 2>&1; then
+    die "a GitHub release $VERSION already exists (delete the draft to rebuild it)"
+  fi
+  # Re-running after a failed build reuses the tag if it is on this commit.
+  resume=false
   if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
-    die "tag $VERSION already exists"
+    [ "$(git rev-list -n1 "$VERSION")" = "$(git rev-parse HEAD)" ] ||
+      die "tag $VERSION exists on another commit"
+    resume=true
   fi
   sha=$(git rev-parse --short HEAD)
   ci=$(gh run list -R "$REPO" -w ci -b main -c "$(git rev-parse HEAD)" --json conclusion --jq '.[0].conclusion' 2>/dev/null || true)
   [ "$ci" = success ] || say "warning: CI on $sha is '${ci:-not found}', not 'success'"
-  say "This tags $sha as $VERSION and pushes it. The release workflow then"
-  say "builds, signs and creates a DRAFT release, and pushes the Homebrew cask,"
-  say "Scoop manifest and winget branch (when their secrets are set)."
-  confirm "Push tag $VERSION?"
-  git tag -a "$VERSION" -m "mistctl $VERSION"
-  git push origin "$VERSION"
+
+  say "Running the tests..."
+  go vet ./...
+  go test ./...
+
   say ""
-  say "Follow the workflow:  gh run watch -R $REPO \$(gh run list -R $REPO -w release -L 1 --json databaseId --jq '.[0].databaseId')"
-  say "Then review the draft and run:  make publish VERSION=$VERSION"
+  if $resume; then
+    say "Tag $VERSION already points at $sha: rebuilding the release from it."
+  else
+    say "This tags $sha as $VERSION and pushes the tag."
+  fi
+  say "GoReleaser then builds all platforms, signs the macOS binaries as"
+  say "  $CODESIGN_IDENTITY"
+  say "notarizes them (a few minutes), creates a DRAFT GitHub release, and pushes"
+  say "the Homebrew cask, the Scoop manifest and the winget branch."
+  confirm "Release $VERSION?"
+  if ! $resume; then
+    git tag -a "$VERSION" -m "mistctl $VERSION"
+    git push origin "$VERSION"
+  fi
+  token=$(gh auth token)
+  GITHUB_TOKEN=$token TAP_GITHUB_TOKEN=$token WINGET_GITHUB_TOKEN=$token \
+    goreleaser release --clean
+  say ""
+  ok "draft release: https://github.com/$REPO/releases/tag/$VERSION"
+  say "Review it, then run:  make publish VERSION=$VERSION"
 }
 
 cmd_publish() {
   version_arg "$@"
   need_gh
   draft=$(gh release view "$VERSION" -R "$REPO" --json isDraft --jq .isDraft) ||
-    die "no release $VERSION yet (is the workflow still running?)"
+    die "no release $VERSION yet (make release VERSION=$VERSION)"
   [ "$draft" = true ] || die "release $VERSION is already published"
   gh release view "$VERSION" -R "$REPO" --json assets --jq '.assets[].name' | sed 's/^/  /'
   confirm "Publish release $VERSION with the assets above?"
@@ -280,7 +214,7 @@ cmd_winget_pr() {
   v=${VERSION#v}
   branch=mistctl-$v
   gh api "repos/$WINGET_FORK/branches/$branch" >/dev/null 2>&1 ||
-    die "branch $branch not found on $WINGET_FORK (is WINGET_GITHUB_TOKEN set? did the release run?)"
+    die "branch $branch not found on $WINGET_FORK (did make release finish?)"
   draft=$(gh release view "$VERSION" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
   [ "$draft" = false ] || die "publish the release first (make publish VERSION=$VERSION): winget validation downloads it"
   if gh api "repos/$WINGET_UPSTREAM/contents/manifests/t/$OWNER/mistctl" >/dev/null 2>&1; then
@@ -299,11 +233,8 @@ command=${1:-}
 case "$command" in
   doctor) cmd_doctor ;;
   repos) cmd_repos ;;
-  tokens) cmd_tokens ;;
-  secrets-macos) cmd_secrets_macos ;;
-  secrets-windows) cmd_secrets_windows ;;
-  tag) cmd_tag "$@" ;;
+  release) cmd_release "$@" ;;
   publish) cmd_publish "$@" ;;
   winget-pr) cmd_winget_pr "$@" ;;
-  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

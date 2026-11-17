@@ -1,6 +1,8 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 # GoReleaser configuration for mistctl.
 #
+# Releases run on the maintainer's Mac (make release), which signs and
+# notarizes the macOS binaries with the local keychain.
 # Signing and package publishing are opt-in: each step only runs when its
 # secrets are present, so a fork or a first release works without them.
 # See RELEASING.md for the secrets and one-time setup.
@@ -35,7 +37,11 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
     hooks:
       post:
-        # Authenticode-signs Windows binaries when WINDOWS_SIGN_* secrets are set.
+        # Signs and notarizes macOS binaries with the local keychain when
+        # CODESIGN_IDENTITY is set (releases run on the maintainer's Mac).
+        - cmd: ./scripts/sign-macos.sh "{{ .Path }}" "{{ .Target }}"
+          output: true
+        # Authenticode-signs Windows binaries when WINDOWS_SIGN_* is set.
         - cmd: ./scripts/sign-windows.sh "{{ .Path }}" "{{ .Target }}"
           output: true
 
@@ -56,21 +62,6 @@ checksum:
 
 sboms:
   - artifacts: archive
-
-# macOS: sign and notarize with the Apple Developer ID certificate.
-# Runs on Linux runners too (uses quill under the hood).
-notarize:
-  macos:
-    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
-      sign:
-        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
-        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
-      notarize:
-        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
-        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
-        key: "{{ .Env.MACOS_NOTARY_KEY }}"
-        wait: true
-        timeout: 20m
 
 nfpms:
   - id: packages
@@ -103,7 +94,7 @@ homebrew_casks:
     license: MIT
     # Homebrew disables casks that fail Gatekeeper, so only publish the cask
     # when the macOS binaries are signed and notarized.
-    skip_upload: '{{ if and (isEnvSet "TAP_GITHUB_TOKEN") (isEnvSet "MACOS_SIGN_P12") }}false{{ else }}true{{ end }}'
+    skip_upload: '{{ if and (isEnvSet "TAP_GITHUB_TOKEN") (ne (envOrDefault "CODESIGN_IDENTITY" "") "") }}false{{ else }}true{{ end }}'
     completions:
       bash: completions/mistctl.bash
       zsh: completions/mistctl.zsh
