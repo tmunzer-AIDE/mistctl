@@ -13,6 +13,7 @@ const (
 	profileAP  = "88888888-0000-0000-0000-000000000001"
 	profileSW  = "88888888-0000-0000-0000-000000000002"
 	unassigned = "00000000-0000-0000-1000-5c5b35000099"
+	webhookID  = "77777777-0000-0000-0000-000000000001"
 )
 
 // inventoryRoute answers /inventory, applying the query filters the API
@@ -61,8 +62,30 @@ func setupReview(t *testing.T) *routeMist {
 				http.Error(w, `{"detail":"type is required by this fake"}`, 400)
 			}
 		},
-		org + "/sitegroups": body(fmt.Sprintf(`[{"id":"%s","name":"EMEA"}]`, sgEMEA)),
-		org + "/sites":      body(fmt.Sprintf(`[{"id":"%s","name":"HQ","sitegroup_ids":[]},{"id":"%s","name":"Lab","sitegroup_ids":["%s"]}]`, siteHQ, siteLab, sgEMEA)),
+		org + "/nac_clients/search": func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, `{"results":[{"mac":"aabbccddeeff","last_username":"jdoe","last_status":"denied","auth_type":"eap-tls","last_ssid":"Corp","last_vlan":"10","last_nacrule_name":"deny-byod","site_id":"%s","timestamp":1790000000}]}`, siteHQ)
+		},
+		hq + "/nac_clients/search":         body(`{"results":[]}`),
+		org + "/nac_clients/events/search": body(`{"results":[{"type":"NAC_CLIENT_DENY","mac":"aabbccddeeff","username":"jdoe","auth_type":"eap-tls","ssid":"Corp","ap":"5c5b35000001","text":"certificate expired","timestamp":1790000000}]}`),
+		org + "/wan_clients/search":        body(fmt.Sprintf(`{"results":[{"mac":"001122334455","hostname":["printer"],"last_hostname":"printer","last_ip":"10.1.0.25","network":"corp-lan","mfg":"HP","site_id":"%s","timestamp":1790000000}]}`, siteHQ)),
+		org + "/wan_clients/events/search": body(`{"results":[{"ev_type":"MARVIS_EVENT_CLIENT_DHCP_FAILURE","mac":"001122334455","text":"no lease","timestamp":1790000000}]}`),
+		org + "/stats/tunnels/search": func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("type") == "wxtunnel" {
+				fmt.Fprint(w, `{"results":[{"ap":"5c5b35000001","mxedge_id":"me1","state":"established","remote_ip":"10.9.9.9"}]}`)
+				return
+			}
+			fmt.Fprintf(w, `{"results":[{"mac":"5c5b35000002","tunnel_name":"zscaler-1","wan_name":"wan0","peer_ip":"165.225.0.1","up":false,"protocol":"ipsec","site_id":"%s"}]}`, siteHQ)
+		},
+		org + "/alarmtemplates": body(`[{"id":"at1","name":"Default","rules":{"device_down":{"enabled":true},"switch_down":{"enabled":true}}}]`),
+		"/api/v1/const/alarm_defs": body(`[{"key":"device_down","group":"infrastructure","severity":"warn","display":"Device offline","fields":["aps"]},
+			{"key":"health_check_failed","group":"marvis","severity":"critical","display":"Marvis health check failed","fields":[]}]`),
+		"/api/v1/const/device_events":                     body(`[{"key":"AP_DISCONNECTED","display":"AP disconnected","group":"ap"}]`),
+		"/api/v1/const/client_events":                     body(`[{"key":"CLIENT_DEAUTHENTICATED","display":"Client deauthenticated"}]`),
+		org + "/webhooks":                                 body(`[{"id":"` + webhookID + `","name":"splunk-alarms","type":"splunk","enabled":true,"topics":["alarms"],"url":"https://splunk.example.com","splunk_token":"s3cr3t-token","headers":{"X-Api-Key":"k3y"}}]`),
+		hq + "/webhooks":                                  body(`[{"id":"w2","name":"site-hook","type":"http-post","secret":"hush","topics":["device-updowns"]}]`),
+		org + "/webhooks/" + webhookID + "/events/search": body(`{"results":[{"id":"d1","topic":"alarms","status":"failure","status_code":503,"error":"service unavailable","timestamp":1790000000}]}`),
+		org + "/sitegroups":                               body(fmt.Sprintf(`[{"id":"%s","name":"EMEA"}]`, sgEMEA)),
+		org + "/sites":                                    body(fmt.Sprintf(`[{"id":"%s","name":"HQ","sitegroup_ids":[]},{"id":"%s","name":"Lab","sitegroup_ids":["%s"]}]`, siteHQ, siteLab, sgEMEA)),
 	})
 }
 
@@ -142,4 +165,113 @@ func TestDeviceProfilesAndSiteGroups(t *testing.T) {
 	out = run(t, "describe", "sitegroup", "EMEA")
 	assertContains(t, out, "Members:", "Lab", "sites:")
 	assertNotContains(t, out, "HQ")
+}
+
+func TestNacAndWanClients(t *testing.T) {
+	fake := setupReview(t)
+	out := run(t, "get", "nac-clients", "--status", "denied", "--username", "jdoe", "--ssid", "Corp", "--auth-type", "eap-tls", "--mac", "aa:bb:cc:dd:ee:ff", "--duration", "7d")
+	assertContains(t, out, "aabbccddeeff", "jdoe", "denied", "eap-tls", "Corp", "deny-byod", "HQ")
+	c := fake.called("/api/v1/orgs/" + orgID + "/nac_clients/search")
+	for _, want := range []string{"status=denied", "username=jdoe", "ssid=Corp", "auth_type=eap-tls", "mac=aabbccddeeff", "sort=-timestamp"} {
+		if len(c) != 1 || !strings.Contains(c[0], want) {
+			t.Errorf("nac-clients: %s not sent: %v", want, c)
+		}
+	}
+	if windowOf(c[0]) != 7*86400 {
+		t.Errorf("nac-clients window: %v", c)
+	}
+	run(t, "get", "nac-clients", "--site", "HQ")
+	if len(fake.called("/api/v1/sites/"+siteHQ+"/nac_clients/search")) != 1 {
+		t.Error("site NAC clients should use the site search")
+	}
+	if _, err := runErr("get", "nac-clients", "--status", "maybe"); err == nil {
+		t.Error("expected invalid --status error")
+	}
+
+	out = run(t, "get", "wan-clients", "--network", "corp-lan", "--ip", "10.1.0.25")
+	assertContains(t, out, "printer", "001122334455", "10.1.0.25", "corp-lan", "HP")
+	if c := fake.called("/api/v1/orgs/" + orgID + "/wan_clients/search"); len(c) != 1 || !strings.Contains(c[0], "network=corp-lan") || !strings.Contains(c[0], "ip=10.1.0.25") {
+		t.Errorf("wan-clients filters not sent: %v", c)
+	}
+}
+
+func TestNacAndWanEvents(t *testing.T) {
+	fake := setupReview(t)
+	out := run(t, "get", "events", "--source", "nac", "--client", "aa:bb:cc:dd:ee:ff", "--username", "jdoe", "--device", "ap-lobby")
+	assertContains(t, out, "NAC_CLIENT_DENY", "aabbccddeeff", "jdoe", "eap-tls", "ap-lobby", "USERNAME")
+	c := fake.called("/api/v1/orgs/" + orgID + "/nac_clients/events/search")
+	if len(c) != 1 || !strings.Contains(c[0], "mac=aabbccddeeff") || !strings.Contains(c[0], "username=jdoe") || !strings.Contains(c[0], "ap=5c5b35000001") {
+		t.Errorf("nac event filters not sent: %v", c)
+	}
+	out = run(t, "get", "events", "--source", "wan", "--client", "00:11:22:33:44:55")
+	assertContains(t, out, "MARVIS_EVENT_CLIENT_DHCP_FAILURE", "001122334455", "no lease")
+	if c := fake.called("/api/v1/orgs/" + orgID + "/wan_clients/events/search"); len(c) != 1 || !strings.Contains(c[0], "mac=001122334455") {
+		t.Errorf("wan event filters not sent: %v", c)
+	}
+	for _, args := range [][]string{
+		{"get", "events", "--source", "wan", "--device", "sw-core"},
+		{"get", "events", "--source", "system", "--client", "aa:bb:cc:dd:ee:ff"},
+		{"get", "events", "--source", "device", "--band", "5"},
+	} {
+		if _, err := runErr(args...); err == nil || !strings.Contains(err.Error(), "does not apply") {
+			t.Errorf("%v: expected a does-not-apply error, got %v", args, err)
+		}
+	}
+}
+
+func TestTunnels(t *testing.T) {
+	fake := setupReview(t)
+	out := run(t, "get", "tunnels", "--site", "HQ", "--up", "false", "--device", "sw-core")
+	assertContains(t, out, "sw-core", "zscaler-1", "wan0", "165.225.0.1", "false", "ipsec")
+	c := fake.called("/api/v1/orgs/" + orgID + "/stats/tunnels/search")
+	if len(c) != 1 || !strings.Contains(c[0], "up=false") || !strings.Contains(c[0], "site_id="+siteHQ) || !strings.Contains(c[0], "mac=5c5b35000002") || !strings.Contains(c[0], "type=wan") {
+		t.Errorf("tunnel filters not sent (an explicit false must be kept): %v", c)
+	}
+	out = run(t, "get", "tunnels", "--type", "wxtunnel")
+	assertContains(t, out, "MXEDGE", "ap-lobby", "established")
+	if _, err := runErr("get", "tunnels", "--up", "maybe"); err == nil {
+		t.Error("expected invalid --up error")
+	}
+}
+
+func TestAlarmTemplatesAndDefinitions(t *testing.T) {
+	setupReview(t)
+	assertContains(t, run(t, "get", "alarmtemplates"), "Default", "2")
+	out := run(t, "get", "alarm-definitions")
+	assertContains(t, out, "device_down", "Device offline", "health_check_failed")
+	out = run(t, "get", "alarm-definitions", "--group", "marvis")
+	assertNotContains(t, out, "device_down")
+	assertContains(t, run(t, "get", "event-definitions"), "AP_DISCONNECTED", "AP disconnected")
+	assertContains(t, run(t, "get", "event-definitions", "--source", "client"), "CLIENT_DEAUTHENTICATED")
+	// --type completion comes from the definitions
+	assertContains(t, run(t, "__complete", "get", "alarms", "--type", "dev"), "device_down")
+	assertNotContains(t, run(t, "__complete", "get", "alarms", "--type", "dev"), "health_check_failed")
+	assertContains(t, run(t, "__complete", "get", "events", "--source", "client", "--type", ""), "CLIENT_DEAUTHENTICATED")
+	assertContains(t, run(t, "__complete", "get", "events", "--type", "AP"), "AP_DISCONNECTED")
+}
+
+func TestWebhooks(t *testing.T) {
+	fake := setupReview(t)
+	out := run(t, "get", "webhooks", "-o", "yaml")
+	assertContains(t, out, "splunk-alarms", "REDACTED")
+	assertNotContains(t, out, "s3cr3t-token", "k3y")
+	out = run(t, "describe", "webhook", "splunk-alarms")
+	assertContains(t, out, "Name:", "splunk-alarms", "splunk_token: REDACTED")
+	assertNotContains(t, out, "s3cr3t-token")
+	out = run(t, "get", "webhooks", "--site", "HQ", "-o", "json")
+	assertContains(t, out, "site-hook", "REDACTED")
+	assertNotContains(t, out, "hush")
+
+	if _, err := runErr("get", "webhook-deliveries"); err == nil || !strings.Contains(err.Error(), "--webhook") {
+		t.Errorf("expected --webhook required, got %v", err)
+	}
+	out = run(t, "get", "webhook-deliveries", "--webhook", "splunk-alarms", "--status", "failure", "--topic", "alarms")
+	assertContains(t, out, "alarms", "failure", "503", "service unavailable")
+	c := fake.called("/api/v1/orgs/" + orgID + "/webhooks/" + webhookID + "/events/search")
+	if len(c) != 1 || !strings.Contains(c[0], "status=failure") || !strings.Contains(c[0], "topic=alarms") {
+		t.Errorf("delivery filters not sent: %v", c)
+	}
+	if _, err := runErr("get", "webhook-deliveries", "--webhook", "nope"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected webhook not found, got %v", err)
+	}
 }

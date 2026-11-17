@@ -35,6 +35,19 @@ type listOpts struct {
 	mac        string // inventory, clients, nac/wan clients
 	state      string // inventory: assigned, unassigned
 	derived    bool   // site-settings
+	// historical searches
+	start, end string
+	sortOrder  string // newest, oldest
+	// search filters (see each resource's flags)
+	ip, text, ssid, vlan, username, port   string
+	hostname, network, authType, authState string
+	clientMAC, reason, nacRule             string
+	acked, ackAdmin, up, poe               string
+	neighbor, stp, peer                    string
+	speed                                  int
+	history                                bool
+	mapstack, sitegroup                    string
+	webhook, topic                         string
 }
 
 // resource is one curated Mist object type.
@@ -150,7 +163,7 @@ func findResource(name string) (*resource, error) {
 
 func init() {
 	registry = []*resource{
-		orgsResource(), sitesResource(), devicesResource(), inventoryResource(), clientsResource(),
+		orgsResource(), sitesResource(), devicesResource(), inventoryResource(), clientsResource(), nacClientsResource(), wanClientsResource(),
 		// configuration objects
 		wlansResource(), wlanTemplatesResource(),
 		orgTemplateResource("rftemplates", "rftemplate", "RF templates", "/rftemplates", listOrgRfTemplates),
@@ -160,10 +173,12 @@ func init() {
 		networksResource(), servicesResource(), evpnTopologiesResource(),
 		mapsResource(), mapstacksResource(),
 		orgSettingsResource(), siteSettingsResource(), deviceProfilesResource(), siteGroupsResource(),
+		alarmTemplatesResource(), webhooksResource(),
 		// monitoring
 		alarmsResource(), eventsResource(), slesResource(), rrmResource(), rrmEventsResource(),
+		alarmDefinitionsResource(), eventDefinitionsResource(), webhookDeliveriesResource(),
 		// stats
-		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(),
+		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(), tunnelsResource(),
 	}
 	applyResourceHelp()
 	applyNameKeys()

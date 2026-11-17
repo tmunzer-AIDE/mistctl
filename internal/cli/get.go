@@ -86,6 +86,11 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 			if a.output == "table" || a.output == "wide" {
 				if r.SortDesc != "" {
 					sortDesc(items, r.SortDesc)
+					if o.sortOrder == "oldest" {
+						for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+							items[i], items[j] = items[j], items[i]
+						}
+					}
 				} else {
 					output.SortBy(items, cols[0])
 				}
@@ -106,14 +111,20 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 		_ = cmd.RegisterFlagCompletionFunc(name, fixedCompletion(values...))
 	}
 	if f := cmd.Flags().Lookup("type"); f != nil && r.FlagValues["type"] == nil {
-		// Device and client types are enums; alarm and event types are
-		// free-form (and many), so they get no suggestions rather than
-		// wrong ones.
+		// Device and client types are enums; alarm and event types come
+		// from the API's alarm and event definitions (cached).
 		switch r.Name {
 		case "devices":
 			_ = cmd.RegisterFlagCompletionFunc("type", fixedCompletion(deviceTypes...))
 		case "clients":
 			_ = cmd.RegisterFlagCompletionFunc("type", fixedCompletion(clientTypes...))
+		case "alarms":
+			_ = cmd.RegisterFlagCompletionFunc("type", a.completeDefinitions(func(*cobra.Command) string { return "alarms" }))
+		case "events":
+			_ = cmd.RegisterFlagCompletionFunc("type", a.completeDefinitions(func(c *cobra.Command) string {
+				src, _ := c.Flags().GetString("source")
+				return src
+			}))
 		default:
 			_ = cmd.RegisterFlagCompletionFunc("type", cobra.NoFileCompletions)
 		}

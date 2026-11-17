@@ -137,6 +137,44 @@ does not set it.`,
 		describe:         "Prints the site group followed by its sites (the sites whose sitegroup_ids name it; one extra API call).",
 		describeExamples: []string{"describe sitegroup EMEA"},
 	},
+	"nac-clients": {
+		group: "inventory", title: "NAC client",
+		short: "Mist NAC clients: authentication result, NAC rule, VLAN",
+		about: `Searches the clients that authenticated through Mist NAC during --duration
+(default 1d), newest first. Every filter is applied by the API. Use
+` + "`get events --source nac`" + ` for the authentication events of a client.`,
+		examples: []string{
+			"get nac-clients",
+			"get nac-clients --status denied --duration 7d",
+			"get nac-clients --username jdoe -o wide",
+			"get nac-clients --site HQ --ssid Corp --auth-type eap-tls",
+			"get nac-client aa:bb:cc:dd:ee:ff -o yaml",
+		},
+	},
+	"wan-clients": {
+		group: "inventory", title: "WAN client",
+		short: "Clients behind WAN edges (DHCP leases and networks)",
+		about: "Searches the clients seen by WAN edges during --duration (default 1d). Every filter is applied by the API. Use `get events --source wan` for their events.",
+		examples: []string{
+			"get wan-clients",
+			"get wan-clients --site Branch-12 --network corp-lan",
+			"get wan-clients --ip 10.1.0.25 -o yaml",
+		},
+	},
+	"alarmtemplates": {
+		group: "config", title: "alarm template",
+		examples:         []string{"get alarmtemplates", "get alarmtemplates -o yaml"},
+		describeExamples: []string{"describe alarmtemplate Default"},
+	},
+	"webhooks": {
+		group: "config", title: "webhook",
+		about: `Without a site, lists the org webhooks; with a site, the webhooks of that
+site. Credentials (secret, Splunk token, OAuth2 secrets and custom headers)
+are replaced by "REDACTED" in every output. See
+` + "`get webhook-deliveries --webhook NAME`" + ` for the delivery attempts.`,
+		examples:         []string{"get webhooks -A", "get webhooks --site HQ -o wide"},
+		describeExamples: []string{"describe webhook splunk-alarms"},
+	},
 	"wlans": {
 		group: "config", title: "WLAN",
 		short: "WLANs: org-level (template) WLANs, or the WLANs applied to a site",
@@ -263,6 +301,40 @@ interference seen per channel and the limits set by the RF template.`,
 		examples: []string{"get rrm-events --site HQ", "get rrm-events --site HQ --band 5 --duration 7d"},
 	},
 
+	"alarm-definitions": {
+		group: "monitoring", title: "alarm definition",
+		about:    "Lists every alarm type Mist can raise, with its group, default severity and what it means. These are the values `get alarms --type` accepts (and completes). No org is needed.",
+		examples: []string{"get alarm-definitions", "get alarm-definitions --group marvis -o wide", "get alarm-definition switch_down -o yaml"},
+	},
+	"event-definitions": {
+		group: "monitoring", title: "event definition",
+		about:    "Lists the event types of one --source (device, client, system, nac or mxedge) and what they mean. These are the values `get events --type` accepts (and completes) for that source. No org is needed.",
+		examples: []string{"get event-definitions", "get event-definitions --source client", "get event-definitions --source nac -o yaml"},
+	},
+	"webhook-deliveries": {
+		group: "monitoring", title: "webhook delivery",
+		about: `Searches the delivery attempts of one org webhook (--webhook, by name or ID)
+during --duration (default 1d), newest first, with the HTTP status code and
+error of each attempt.`,
+		examples: []string{
+			"get webhook-deliveries --webhook splunk-alarms",
+			"get webhook-deliveries --webhook splunk-alarms --status failure --duration 7d",
+			"get webhook-deliveries --webhook splunk-alarms --topic alarms -o yaml",
+		},
+	},
+	"tunnels": {
+		group: "stats", title: "tunnel",
+		short: "WAN edge tunnels, or AP-to-Mist Edge tunnels (--type wxtunnel), with their state",
+		about: `With --type wan (default), lists the tunnels of the WAN edges (IPsec or GRE
+to a peer) with their state and traffic. With --type wxtunnel, lists the
+tunnels between APs and Mist Edges. Every filter is applied by the API.`,
+		examples: []string{
+			"get tunnels -A",
+			"get tunnels --site Branch-12 --up false",
+			"get tunnels -A --device gw-branch-12 -o wide",
+			"get tunnels -A --type wxtunnel",
+		},
+	},
 	"bgp-peers": {
 		group: "stats", title: "BGP peer",
 		short:    "BGP peers of switches and WAN edges",
