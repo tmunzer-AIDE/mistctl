@@ -39,11 +39,6 @@ func enrichDevice(ctx context.Context, a *app, cl *client.Client, d *described, 
 		o.duration = "1d"
 	}
 	mac := cache.NormalizeMAC(rawMAC)
-	w, err := o.window()
-	if err != nil || mac == "" {
-		return
-	}
-	span := siteWindowSpan(w)
 	note := func(key, label string, err error) {
 		if isNotFound(err) {
 			return // no data, as for the stats
@@ -52,6 +47,17 @@ func enrichDevice(ctx context.Context, a *app, cl *client.Client, d *described, 
 		d.Header = append(d.Header, [2]string{label, "unavailable: " + err.Error()})
 		d.Doc = appendField(d.Doc, key+"_error", err.Error())
 	}
+	if mac == "" {
+		return
+	}
+	// The describe command checks the window first; this only guards
+	// against a caller that did not, so the gap is never silent.
+	w, err := o.window()
+	if err != nil {
+		note("window", "Window", err)
+		return
+	}
+	span := siteWindowSpan(w)
 	list := func(items []json.RawMessage) []json.RawMessage {
 		if items == nil {
 			return []json.RawMessage{}

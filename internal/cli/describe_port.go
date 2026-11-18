@@ -44,11 +44,6 @@ func enrichPort(ctx context.Context, a *app, d *described, m map[string]any) {
 	if err != nil || mac == "" || !onSite {
 		return
 	}
-	w, err := o.window()
-	if err != nil {
-		return
-	}
-	span := siteWindowSpan(w)
 	note := func(key, label string, err error) {
 		if isNotFound(err) {
 			return // no data, as for the stats
@@ -57,6 +52,14 @@ func enrichPort(ctx context.Context, a *app, d *described, m map[string]any) {
 		d.Header = append(d.Header, [2]string{label, "unavailable: " + err.Error()})
 		d.Doc = appendField(d.Doc, key+"_error", err.Error())
 	}
+	// The describe command checks the window first; this only guards
+	// against a caller that did not, so the gap is never silent.
+	w, err := o.window()
+	if err != nil {
+		note("window", "Window", err)
+		return
+	}
+	span := siteWindowSpan(w)
 
 	// the neighbor, when it is a device of the org (no API call: device index)
 	if n := a.macNames(ctx)[cache.NormalizeMAC(output.Text(m["neighbor_mac"]))]; n != "" {
