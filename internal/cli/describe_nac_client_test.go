@@ -17,7 +17,7 @@ func nacClientRoutes() map[string]http.HandlerFunc {
 			}
 			_, _ = w.Write([]byte(`{"results":[{"mac":"aabbccddeeff","last_username":"jdoe","last_status":"denied","auth_type":"eap-tls",
 				"last_ssid":"Corp","last_vlan":"10","last_nacrule_id":"11111111-0000-0000-0000-000000000001","last_nacrule_name":"deny-byod",
-				"last_cert_cn":"jdoe-laptop","last_ap":"5c5b35000001","site_id":"` + siteHQ + `","timestamp":1790000000}]}`))
+				"last_cert_cn":"jdoe-laptop","last_ap":"5c5b35000001","last_ip":"10.0.1.7","last_hostname":"jdoe-phone","last_mfg":"Apple","last_os":"iOS","idp_role":["staff"],"site_id":"` + siteHQ + `","timestamp":1790000000}]}`))
 		},
 		org + "/nacrules": body(`[{"id":"11111111-0000-0000-0000-000000000001","name":"deny-byod","action":"block","order":2,"enabled":true,
 			"matching":{"auth_type":"eap-tls","nactags":["22222222-0000-0000-0000-000000000001"]},"apply_tags":["22222222-0000-0000-0000-000000000002"]}]`),
@@ -36,6 +36,7 @@ func TestDescribeNacClient(t *testing.T) {
 		"MAC:", "aabbccddeeff", "Status:", "denied", "Auth:", "eap-tls", "Username:", "jdoe", "Certificate:", "jdoe-laptop",
 		"NAC rule:", "deny-byod (action block; order 2; matches byod-certs; applies quarantine-vlan)",
 		"VLAN:", "10", "SSID / port:", "Corp", "Site:", "HQ (",
+		"Device:", "ap-lobby (5c5b35000001)", "IP:", "10.0.1.7", "Hostname:", "jdoe-phone", "Endpoint:", "Apple iOS", "IdP roles:", "staff",
 		"Labels:", "byod,lab (user MAC lab laptop)",
 		"Events:", "1 in the last 7d",
 		"Authentication events, newest first:", "NAC_CLIENT_DENY", "certificate expired",
@@ -83,4 +84,28 @@ func TestDescribeNacClientEdges(t *testing.T) {
 	if _, err := runErr("describe", "nac-client", "00:11:22:33:44:55", "--duration", "1d"); err == nil || !strings.Contains(err.Error(), "not found in the last 1d") {
 		t.Errorf("expected a not-found error with the window, got %v", err)
 	}
+}
+
+func TestDescribeNacClientNoRule(t *testing.T) {
+	routes := nacClientRoutes()
+	org := "/api/v1/orgs/" + orgID
+	routes[org+"/nac_clients/search"] = body(`{"results":[{"mac":"aabbccddeeff","last_status":"denied","random_mac":true,
+		"last_nacrule_id":"00000000-0000-0000-0000-000000000000","nacrule_matched":false,"timestamp":1790000000}]}`)
+	var rows []string
+	for i := 0; i < 10; i++ {
+		rows = append(rows, `{"type":"NAC_CLIENT_DENY","mac":"aabbccddeeff","nacrule_id":"00000000-0000-0000-0000-000000000000","timestamp":1790000000}`)
+	}
+	routes[org+"/nac_clients/events/search"] = body(`{"results":[` + strings.Join(rows, ",") + `],"next":"/x?search_after=1"}`)
+	f := setupRoutes(t, routes)
+	out := run(t, "describe", "nac-client", "aabbccddeeff")
+	assertContains(t, out, "aabbccddeeff (a random MAC address)", "NAC rule:", "none matched (denied by default)",
+		"the 10 newest of the last 7d (see `mistctl get events --source nac --client aabbccddeeff` for more)", "none matched")
+	assertNotContains(t, out, "00000000-0000-0000-0000-000000000000 (", "no longer in the NAC rules")
+	// no rule to resolve: the rules and tags are not read
+	if c := f.called(org + "/nacrules"); len(c) != 0 {
+		t.Errorf("the NAC rules should not be read when no rule matched, got %v", c)
+	}
+	// the IP column of get nac-clients reads last_ip
+	routes[org+"/nac_clients/search"] = body(`{"results":[{"mac":"aabbccddeeff","last_ip":"10.0.1.7","timestamp":1790000000}]}`)
+	assertContains(t, run(t, "get", "nac-clients", "-o", "wide"), "10.0.1.7")
 }

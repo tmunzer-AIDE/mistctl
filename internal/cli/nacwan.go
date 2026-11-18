@@ -66,7 +66,7 @@ func nacClientsResource() *resource {
 			output.Col("VLAN", "last_vlan", "vlan"),
 			output.Col("NAC-RULE", "last_nacrule_name", "nacrule_name"),
 			output.Col("SITE", "site_name", "site_id"),
-			output.Col("IP", "last_client_ip", "client_ip").AsWide(),
+			output.Col("IP", "last_ip", "ip", "last_client_ip", "client_ip").AsWide(),
 			output.Col("DEVICE", "last_ap", "ap", "device_mac").AsWide(),
 			output.Col("NAS", "last_nas_vendor", "nas_vendor").AsWide(),
 			output.Col("CERT-CN", "last_cert_cn", "cert_cn").AsWide(),

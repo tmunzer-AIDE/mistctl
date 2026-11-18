@@ -75,8 +75,14 @@ func describeNacClient(ctx context.Context, a *app, name string) (*described, er
 	d := &described{Primary: raw}
 
 	// 2. the rule it matched, with its tags by name
+	// The all-zero rule ID (nacrule_matched false) means that no rule
+	// matched: the client was denied by default.
 	ruleLine := t("last_nacrule_name", "nacrule_name")
-	if id := t("last_nacrule_id", "nacrule_id"); id != "" {
+	id := t("last_nacrule_id", "nacrule_id")
+	if noNacRule(id) || output.Text(c["nacrule_matched"]) == "false" {
+		ruleLine, id = "none matched (denied by default)", ""
+	}
+	if id != "" {
 		rules, rerr := listNacRules(ctx, a, 0)
 		s.unavailable("nac_rule", rerr)
 		for _, it := range rules {
@@ -144,7 +150,7 @@ func describeNacClient(ctx context.Context, a *app, name string) (*described, er
 		if n := len(events); n > 0 {
 			eventLine = fmt.Sprintf("%d in the last %s", n, span)
 			if n == maxNacEvents {
-				eventLine = fmt.Sprintf("the last %d of the last %s", n, span)
+				eventLine = fmt.Sprintf("the %d newest of the last %s (see `mistctl get events --source nac --client %s` for more)", n, span, mac)
 			}
 			d.Tables = append(d.Tables, describedTable{Title: "Authentication events, newest first", Rows: events, Cols: []output.Column{
 				output.Col("AGE", "timestamp").WithFormat(output.Age),
@@ -153,7 +159,12 @@ func describeNacClient(ctx context.Context, a *app, name string) (*described, er
 				output.Col("USERNAME", "username", "idp_username"),
 				output.Col("SSID/PORT", "ssid", "port_id"),
 				output.Col("VLAN", "vlan"),
-				output.Col("NAC-RULE", "nacrule_name", "nacrule_id"),
+				output.Col("NAC-RULE", "nacrule_name", "nacrule_id").WithFormat(func(v any) string {
+					if noNacRule(output.Text(v)) {
+						return "none matched"
+					}
+					return output.Text(v)
+				}),
 				output.Col("REASON", "text").WithFormat(shortText),
 			}})
 		}
@@ -163,8 +174,16 @@ func describeNacClient(ctx context.Context, a *app, name string) (*described, er
 	if id := t("site_id"); id != "" {
 		site = siteLabel(a.siteNames(ctx), id)
 	}
+	device := t("last_ap", "ap", "device_mac")
+	if n := a.macNames(ctx)[cache.NormalizeMAC(device)]; n != "" {
+		device = n + " (" + device + ")"
+	}
+	randomMAC := ""
+	if t("random_mac") == "true" {
+		randomMAC = " (a random MAC address)"
+	}
 	d.Header = [][2]string{
-		{"MAC", mac},
+		{"MAC", mac + randomMAC},
 		{"Last seen", ageOf(c["timestamp"])},
 		{"Status", t("last_status", "status")},
 		{"Auth", t("auth_type", "last_auth_type")},
@@ -173,9 +192,12 @@ func describeNacClient(ctx context.Context, a *app, name string) (*described, er
 		{"NAC rule", ruleLine},
 		{"VLAN", t("last_vlan", "vlan")},
 		{"SSID / port", t("last_ssid", "ssid", "last_port_id", "port_id")},
-		{"Device", t("last_ap", "ap", "last_nas_ip", "device_mac")},
-		{"NAS", t("last_nas_vendor", "nas_vendor")},
-		{"IP", t("last_client_ip", "client_ip")},
+		{"Device", device},
+		{"NAS", strings.TrimSpace(t("last_nas_vendor", "nas_vendor") + " " + t("nas_ip"))},
+		{"IP", t("last_ip", "ip", "last_client_ip", "client_ip")},
+		{"Hostname", t("last_hostname", "hostname")},
+		{"Endpoint", strings.Join(strings.Fields(t("last_mfg", "mfg")+" "+t("last_model", "model")+" "+t("last_os", "os")), " ")},
+		{"IdP roles", t("idp_role")},
 		{"Site", site},
 		{"Type", t("type")},
 		{"Labels", labels},
@@ -213,4 +235,9 @@ func firstResult(body json.RawMessage) json.RawMessage {
 		return nil
 	}
 	return list[0]
+}
+
+// noNacRule reports the all-zero rule ID Mist NAC gives when no rule matched.
+func noNacRule(id string) bool {
+	return id != "" && strings.Trim(id, "0-") == ""
 }
