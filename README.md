@@ -119,6 +119,7 @@ mistctl get rrm --site HQ --band 5
 | `site-settings` | | site | `/sites/{id}/setting`; `--derived` for the effective settings (`/sites/{id}/setting/derived`) |
 | `deviceprofiles` | `profiles` | org | `/orgs/{id}/deviceprofiles` (one call per type, or `--type`) |
 | `sitegroups` | | org | `/orgs/{id}/sitegroups` (describe lists the sites) |
+| `licenses` | `subscriptions`, `lic` | org or site | `/orgs/{id}/licenses` (one row per license type: entitled, used, available; `-o wide` adds fully loaded, active subscriptions, next expiry), with a site `/sites/{id}/licenses/usages` (site usage next to the org entitlement) |
 | `alarmtemplates` | | org | `/orgs/{id}/alarmtemplates` |
 | `webhooks` | `wh` | org or site | `/orgs/{id}/webhooks`, `/sites/{id}/webhooks`; secrets and headers are redacted |
 | `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration` or `--start`/`--end`, `--sort`, `--group`, `--severity`, `--type`, `--acked`, `--ack-admin`, `--status` |
@@ -232,7 +233,7 @@ Release packages install completions automatically.
 
 - `mistctl api <path...>`: path-style access to every GET endpoint of the Mist
   OpenAPI spec, with completion from the spec and the cache.
-- More curated resources (licenses, labels and policies,
+- More curated resources (labels and policies,
   topology/LLDP, site-level templates, ...).
 
 ## Development
