@@ -23,12 +23,12 @@ const maxSiteRows = 20
 // use and the scores shown (key of the API, label).
 var siteSLEs = []struct {
 	kind, label, counter string
-	scores               [][2]string
+	scores               [][]string // label, then the keys tried in order
 }{
-	{"wifi", "SLE Wi-Fi", "num_ap", [][2]string{{"coverage", "coverage"}, {"capacity", "capacity"}, {"time-to-connect", "time-to-connect"},
+	{"wifi", "SLE Wi-Fi", "num_ap", [][]string{{"coverage", "coverage"}, {"capacity", "capacity"}, {"time-to-connect", "time-to-connect"},
 		{"successful-connect", "successful-connect"}, {"roaming", "roaming"}, {"throughput", "throughput"}}},
-	{"wired", "SLE wired", "num_switch", [][2]string{{"switch-health", "switch-health"}, {"switch-throughput", "throughput"}, {"switch-bandwidth", "bandwidth"}}},
-	{"wan", "SLE WAN", "num_gateway", [][2]string{{"gateway-health", "gateway-health"}, {"wan-link-health", "wan-link-health"}, {"application_health", "application-health"}}},
+	{"wired", "SLE wired", "num_switch", [][]string{{"switch-health", "switch-health", "switch-health-v2"}, {"throughput", "switch-throughput"}, {"bandwidth", "switch-bandwidth"}}},
+	{"wan", "SLE WAN", "num_gateway", [][]string{{"gateway-health", "gateway-health"}, {"wan-link-health", "wan-link-health"}, {"application-health", "application-health", "application_health"}}},
 }
 
 func siteDescribeFlags(fs *pflag.FlagSet, o *listOpts) {
@@ -76,7 +76,9 @@ func describeSite(ctx context.Context, a *app, name string) (*described, error) 
 	} else if !isNotFound(serr) {
 		s.unavailable("stats", serr)
 	}
-	d := &described{Primary: combine("site", site.Body, "stats", bodyOrNil(stats, serr))}
+	// the stats repeat the site object and their counters are in the
+	// summary: only the site follows in YAML
+	d := &described{Primary: site.Body}
 	span := siteWindowSpan(w)
 
 	// devices that are not connected
@@ -99,9 +101,14 @@ func describeSite(ctx context.Context, a *app, name string) (*described, error) 
 			}
 		}
 		s.addList("disconnected_devices", down)
-		disconnected = fmt.Sprintf("none of %d devices", len(devices))
+		// the device stats cover APs, switches and gateways, not Mist Edges
+		const kinds = " (APs, switches and gateways; see `get mxedges` for Mist Edges)"
+		disconnected = fmt.Sprintf("none of %d devices", len(devices)) + kinds
+		if len(devices) == 0 {
+			disconnected = "no devices" + kinds
+		}
 		if len(down) > 0 {
-			disconnected = fmt.Sprintf("%d of %d devices", len(down), len(devices))
+			disconnected = fmt.Sprintf("%d of %d devices", len(down), len(devices)) + kinds
 			title := "Devices not connected"
 			if len(down) > maxSiteRows {
 				title += fmt.Sprintf(" (first %d of %d)", maxSiteRows, len(down))
@@ -142,17 +149,18 @@ func describeSite(ctx context.Context, a *app, name string) (*described, error) 
 			sort.Slice(parts, func(i, j int) bool {
 				return parts[i][strings.Index(parts[i], " "):] < parts[j][strings.Index(parts[j], " "):]
 			})
-			more, title := "", "Unacknowledged alarms, newest first"
+			more, of, title := "", "", "Unacknowledged alarms, newest first"
 			if n == maxSiteRows {
-				more, title = " or more", title+fmt.Sprintf(" (first %d)", maxSiteRows)
+				more, of, title = " or more", fmt.Sprintf("of the newest %d: ", maxSiteRows), title+fmt.Sprintf(" (first %d)", maxSiteRows)
 			}
-			alarmLine = fmt.Sprintf("%d%s unacknowledged in the last %s (%s)", n, more, span, strings.Join(parts, ", "))
+			alarmLine = fmt.Sprintf("%d%s unacknowledged in the last %s (%s%s)", n, more, span, of, strings.Join(parts, ", "))
 			d.Tables = append(d.Tables, describedTable{Title: title, Rows: alarms, Cols: []output.Column{
 				output.Col("AGE", "timestamp").WithFormat(output.Age),
 				output.Col("SEVERITY", "severity"),
 				output.Col("GROUP", "group"),
 				output.Col("TYPE", "type"),
 				output.Col("COUNT", "count"),
+				output.Col("DEVICES", "hostnames", "aps", "switches", "gateways"),
 				output.Col("ID", "id"),
 			}})
 		}
@@ -191,8 +199,11 @@ func describeSite(ctx context.Context, a *app, name string) (*described, error) 
 		}
 		var parts []string
 		for _, sc := range f.scores {
-			if v, ok := row[sc[0]]; ok && v != nil {
-				parts = append(parts, sc[1]+" "+percent(v))
+			for _, k := range sc[1:] {
+				if v, ok := row[k]; ok && v != nil {
+					parts = append(parts, sc[0]+" "+percent(v))
+					break
+				}
 			}
 		}
 		line := "no data in the last " + span

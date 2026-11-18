@@ -370,7 +370,7 @@ func sitesResource() *resource {
 		},
 		Describe:       describeSite,
 		DescribeFlags:  siteDescribeFlags,
-		DescribeOutput: "a summary and its tables, followed by the site object and its counters in YAML. -o json and -o yaml print one document: site, stats, disconnected_devices, alarms and sles (one entry per SLE family).",
+		DescribeOutput: "a summary and its tables, followed by the site object in YAML. -o json and -o yaml print one document: site, stats, disconnected_devices, alarms and sles (one entry per SLE family).",
 	}
 }
 

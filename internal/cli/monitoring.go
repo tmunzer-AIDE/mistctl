@@ -415,13 +415,13 @@ var sleKinds = []string{"wifi", "wired", "wan"}
 
 func sleColumns(kind string) []output.Column {
 	cols := []output.Column{output.Col("SITE", "site_name", "site_id")}
-	pct := func(h, p string) output.Column { return output.Col(h, p).WithFormat(percent) }
+	pct := func(h string, p ...string) output.Column { return output.Col(h, p...).WithFormat(percent) }
 	switch kind {
 	case "wired":
 		cols = append(cols,
 			output.Col("SWITCHES", "num_switches"),
 			output.Col("CLIENTS", "num_clients"),
-			pct("SWITCH-HEALTH", "switch-health"),
+			pct("SWITCH-HEALTH", "switch-health", "switch-health-v2"),
 			pct("THROUGHPUT", "switch-throughput"),
 			pct("BANDWIDTH", "switch-bandwidth"),
 		)
@@ -431,7 +431,7 @@ func sleColumns(kind string) []output.Column {
 			output.Col("CLIENTS", "num_clients"),
 			pct("GATEWAY-HEALTH", "gateway-health"),
 			pct("WAN-LINK-HEALTH", "wan-link-health"),
-			pct("APP-HEALTH", "application_health"),
+			pct("APP-HEALTH", "application-health", "application_health"),
 		)
 	default:
 		cols = append(cols,
