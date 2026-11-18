@@ -99,7 +99,7 @@ func TestDescribeNacClientNoRule(t *testing.T) {
 	f := setupRoutes(t, routes)
 	out := run(t, "describe", "nac-client", "aabbccddeeff")
 	assertContains(t, out, "aabbccddeeff (a random MAC address)", "NAC rule:", "none matched (denied by default)",
-		"the 10 newest of the last 7d (see `mistctl get events --source nac --client aabbccddeeff` for more)", "none matched")
+		"the 10 newest of the last 7d (more with `mistctl get events --source nac --client aabbccddeeff` over the same window)", "none matched")
 	assertNotContains(t, out, "00000000-0000-0000-0000-000000000000 (", "no longer in the NAC rules")
 	// no rule to resolve: the rules and tags are not read
 	if c := f.called(org + "/nacrules"); len(c) != 0 {

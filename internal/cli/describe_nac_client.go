@@ -150,7 +150,7 @@ func describeNacClient(ctx context.Context, a *app, name string) (*described, er
 		if n := len(events); n > 0 {
 			eventLine = fmt.Sprintf("%d in the last %s", n, span)
 			if n == maxNacEvents {
-				eventLine = fmt.Sprintf("the %d newest of the last %s (see `mistctl get events --source nac --client %s` for more)", n, span, mac)
+				eventLine = fmt.Sprintf("the %d newest of the last %s (more with `mistctl get events --source nac --client %s` over the same window)", n, span, mac)
 			}
 			d.Tables = append(d.Tables, describedTable{Title: "Authentication events, newest first", Rows: events, Cols: []output.Column{
 				output.Col("AGE", "timestamp").WithFormat(output.Age),
