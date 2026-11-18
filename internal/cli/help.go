@@ -342,6 +342,12 @@ until --limit matching events are found.
 --duration (default 1d). --sle picks the family and so the columns: wifi
 (default), wired or wan. With a site, only that site is shown.`,
 		examples: []string{"get sles -A", "get sles -A --sle wired --duration 7d", "get sles --site HQ --sle wan"},
+		describe: "Explains one SLE metric of a site. METRIC is the metric name of the API, e.g. time-to-connect, failed-to-connect (the SUCCESSFUL-CONNECT column of `get sles`; successful-connect is accepted too), coverage, capacity, roaming, throughput, ap-health, switch-health-v3, switch-throughput, gateway-health, wan-link-health or application-health. An unknown name lists the metrics of the site; some exist in several versions (switch-health, switch-health-v2, ...) and a version without data names the others. Over --duration (default 1d) or --start/--end, it prints the success rate, as `get sles` shows it, and the classifiers behind the degraded part, ranked by their share of it and counted in their own unit (user-minutes, attempts, ...) (GET /sites/{site_id}/sle/site/{site_id}/metric/{metric}/summary-trend; 1 API call). --with impacted adds the most degraded clients and APs (switches and wired clients for a wired metric, gateways and interfaces for a WAN metric; 2 more API calls).",
+		describeExamples: []string{
+			"describe sle time-to-connect --site HQ",
+			"describe sle failed-to-connect --site HQ --duration 4h --with impacted",
+			"describe sle wan-link-health --site HQ --duration 7d -o json",
+		},
 	},
 	"rrm": {
 		group: "monitoring", title: "RRM state",
@@ -571,15 +577,17 @@ func (r *resource) describeLong() string {
 		body = fmt.Sprintf("Prints the full configuration of one %s. NAME is its name or ID.", r.title())
 	}
 	scope := r.scopeHelp()
+	if r.DescribeSite {
+		scope = "Scope: site. Needs a site: --site, or the default site of the current context."
+	}
 	if r.DescribeOrgWide {
 		scope = wrap(fmt.Sprintf("Scope: org. The %s is looked up in the whole org of the current context (or --org), whatever the site.", r.title()))
 	}
-	return strings.Join([]string{
-		r.describeShort() + ".",
-		body,
-		scope,
-		"Output: a short summary followed by the full document in YAML. With -o json\nor -o yaml only the document is printed.",
-	}, "\n\n")
+	out := "Output: a short summary followed by the full document in YAML. With -o json\nor -o yaml only the document is printed."
+	if r.DescribeOutput != "" {
+		out = wrap("Output: " + r.DescribeOutput)
+	}
+	return strings.Join([]string{r.describeShort() + ".", body, scope, out}, "\n\n")
 }
 
 // fieldLabel names an API field in help sentences.

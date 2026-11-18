@@ -17,10 +17,10 @@ and status in YAML. With -o json or -o yaml only the full document is printed.
 
 NAME is a name or an ID. Devices and Mist Edges also accept a MAC address,
 WLANs their SSID, and ports DEVICE:PORT. Clients are identified by their MAC
-address only, alarms by their ID.
+address only, alarms by their ID, and SLEs by their metric name.
 Each resource has its own help: mistctl describe RESOURCE -h
 
-Resources that are searches (events, SLEs, RRM, BGP and OSPF peers) cannot
+Resources that are searches (events, RRM, BGP and OSPF peers) cannot
 be described; use ` + "`mistctl get RESOURCE -o yaml`" + ` to see all their fields.`,
 		Example: `  mistctl describe site HQ
   mistctl describe device ap-lobby-01
@@ -85,6 +85,9 @@ be described; use ` + "`mistctl get RESOURCE -o yaml`" + ` to see all their fiel
 						return err
 					}
 					fmt.Fprintln(a.out)
+				}
+				if d.NoYAML {
+					return nil
 				}
 				if len(d.Primary) > 0 {
 					return output.WriteYAML(a.out, d.Primary)

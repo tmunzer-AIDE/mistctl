@@ -105,6 +105,11 @@ type resource struct {
 	DescribeArg     string
 	DescribeLong    string
 	DescribeExample string
+	// DescribeSite: describe needs a site even though get covers the org.
+	DescribeSite bool
+	// DescribeOutput replaces the default "Output:" paragraph of the
+	// describe help.
+	DescribeOutput string
 }
 
 // described is the result of `describe`.
@@ -116,6 +121,8 @@ type described struct {
 	// sections as Tables). -o json and -o yaml always print Doc.
 	Primary json.RawMessage
 	Tables  []describedTable
+	// NoYAML: the summary and its tables are the whole human output.
+	NoYAML bool
 }
 
 // nameFunc returns the -o name identifier of the resource's items.
