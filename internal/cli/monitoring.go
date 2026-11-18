@@ -66,10 +66,13 @@ func alarmsResource() *resource {
 			output.Col("NOTE", "note").AsWide(),
 			output.Col("ID", "id").AsWide(),
 		},
-		MatchKeys:    []string{"id", "type"},
-		SortDesc:     "timestamp",
-		EnrichAlways: true,
-		Enrich:       addSiteNames,
+		MatchKeys:     []string{"id", "type"},
+		Describe:      describeAlarm,
+		DescribeArg:   "ID",
+		DescribeFlags: alarmDescribeFlags,
+		SortDesc:      "timestamp",
+		EnrichAlways:  true,
+		Enrich:        addSiteNames,
 		FlagValues: map[string][]string{
 			"group":    {"infrastructure", "infra", "marvis", "security", "certificate_expiry"},
 			"severity": alarmSeverities,
@@ -211,7 +214,7 @@ func eventsResource() *resource {
 		},
 		FlagValues: map[string][]string{"source": eventSources, "band": rrmBands, "sort": sortOrders},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
-			fs.StringVar(&o.source, "source", "device", "event source: device, client (wireless), system, nac, wan (WAN edge clients)")
+			fs.StringVar(&o.source, "source", "", "event source (required): device, client (wireless), system, nac, wan (WAN edge clients)")
 			addWindowFlags(fs, o, "1d", "search window")
 			addSortFlag(fs, o)
 			fs.StringVar(&o.eventType, "type", "", "event type, e.g. AP_DISCONNECTED, SW_PORT_DOWN, CLIENT_DEAUTHENTICATED, NAC_CLIENT_DENY")
@@ -267,6 +270,11 @@ func checkEventFlags(o *listOpts) error {
 var orgEventDeviceTypes = "ap,switch,gateway"
 
 func listEvents(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+	if o.source == "" {
+		// --device and --client mean different things per source, so
+		// there is no default: the caller says which events it wants.
+		return nil, fmt.Errorf("--source is required: %s (e.g. `mistctl get events --source device`)", strings.Join(eventSources, ", "))
+	}
 	if !contains(eventSources, o.source) {
 		return nil, fmt.Errorf("invalid --source %q (valid: %s)", o.source, strings.Join(eventSources, ", "))
 	}
@@ -407,13 +415,13 @@ var sleKinds = []string{"wifi", "wired", "wan"}
 
 func sleColumns(kind string) []output.Column {
 	cols := []output.Column{output.Col("SITE", "site_name", "site_id")}
-	pct := func(h, p string) output.Column { return output.Col(h, p).WithFormat(percent) }
+	pct := func(h string, p ...string) output.Column { return output.Col(h, p...).WithFormat(percent) }
 	switch kind {
 	case "wired":
 		cols = append(cols,
 			output.Col("SWITCHES", "num_switches"),
 			output.Col("CLIENTS", "num_clients"),
-			pct("SWITCH-HEALTH", "switch-health"),
+			pct("SWITCH-HEALTH", "switch-health", "switch-health-v2"),
 			pct("THROUGHPUT", "switch-throughput"),
 			pct("BANDWIDTH", "switch-bandwidth"),
 		)
@@ -423,7 +431,7 @@ func sleColumns(kind string) []output.Column {
 			output.Col("CLIENTS", "num_clients"),
 			pct("GATEWAY-HEALTH", "gateway-health"),
 			pct("WAN-LINK-HEALTH", "wan-link-health"),
-			pct("APP-HEALTH", "application_health"),
+			pct("APP-HEALTH", "application-health", "application_health"),
 		)
 	default:
 		cols = append(cols,
@@ -445,13 +453,18 @@ func sleColumns(kind string) []output.Column {
 func slesResource() *resource {
 	return &resource{
 		Name: "sles", Singular: "sle", Aliases: []string{"sle-scores"},
-		Short:      "SLE scores per site over --duration (--sle wifi, wired or wan)",
-		Scope:      "org/site",
-		Endpoint:   "GET /api/v1/orgs/{org_id}/insights/sites-sle",
-		Columns:    sleColumns("wifi"),
-		ColumnsFor: func(o *listOpts) []output.Column { return sleColumns(o.sle) },
-		MatchKeys:  []string{"site_id", "site_name"},
-		FlagValues: map[string][]string{"sle": sleKinds},
+		Short:          "SLE scores per site over --duration (--sle wifi, wired or wan)",
+		Scope:          "org/site",
+		Endpoint:       "GET /api/v1/orgs/{org_id}/insights/sites-sle",
+		Columns:        sleColumns("wifi"),
+		ColumnsFor:     func(o *listOpts) []output.Column { return sleColumns(o.sle) },
+		MatchKeys:      []string{"site_id", "site_name"},
+		Describe:       describeSLE,
+		DescribeArg:    "METRIC",
+		DescribeFlags:  sleDescribeFlags,
+		DescribeSite:   true,
+		DescribeOutput: "a summary and the classifiers table, plus the impacted tables with --with impacted. -o json and -o yaml print one document: summary (what mistctl computed), sle (the API response with its time series) and the impacted lists.",
+		FlagValues:     map[string][]string{"sle": sleKinds},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.sle, "sle", "wifi", "SLE family: wifi, wired, wan")
 			addWindowFlags(fs, o, "1d", "time window")

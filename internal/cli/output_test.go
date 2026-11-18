@@ -79,5 +79,5 @@ func TestTypeCompletion(t *testing.T) {
 	assertContains(t, run(t, "__complete", "get", "devices", "--type", ""), "switch")
 	assertContains(t, run(t, "__complete", "describe", "client", "aa:bb:cc:dd:ee:ff", "--type", ""), "wired")
 	assertContains(t, run(t, "__complete", "describe", "port", "ge-0/0/1", "--device", ""), "sw-core")
-	assertContains(t, run(t, "__complete", "get", "events", "--device", ""), "sw-core")
+	assertContains(t, run(t, "__complete", "get", "events", "--source", "device", "--device", ""), "sw-core")
 }

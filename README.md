@@ -79,7 +79,7 @@ mistctl describe client aa:bb:cc:dd:ee:ff -o json
 mistctl describe client LAPTOP-JDOE
 mistctl get wlans --site HQ
 mistctl get alarms --group infra --severity critical --duration 7d
-mistctl get events --device sw-core --type SW_PORT_DOWN
+mistctl get events --source device --device sw-core --type SW_PORT_DOWN
 mistctl get sles --sle wired
 mistctl get ports --device sw-core --status down
 mistctl get rrm --site HQ --band 5
@@ -91,6 +91,7 @@ mistctl get rrm --site HQ --band 5
 | --- | --- |
 | `get RESOURCE [NAME...]` | List resources as a table, or `-o wide/json/yaml/name` |
 | `describe RESOURCE NAME` | Summary plus full config and status of one object |
+| `troubleshoot client MAC`, `troubleshoot device NAME`, `troubleshoot site [NAME] --type wireless\|wired\|wan` | What Marvis found (reason, explanation, recommendation) over `--duration` or `--start`/`--end`, within the last 7 days; `GET /orgs/{id}/troubleshoot`, needs a Marvis subscription |
 | `attach DEVICE` | Interactive remote shell on a switch or gateway |
 | `whoami` | Identity, cloud and privileges of the current token |
 | `usage` (alias `ratelimit`) | API calls used / remaining in the current hourly window |
@@ -104,11 +105,11 @@ mistctl get rrm --site HQ --band 5
 | Resource | Short names | Scope | Source endpoints |
 | --- | --- | --- | --- |
 | `orgs` | `org` | token | `/self`, `/orgs/{id}`, `/orgs/{id}/stats` |
-| `sites` | `site` | org | `/orgs/{id}/sites`, `/sites/{id}`, `/sites/{id}/stats`; `--sitegroup`, `--template` |
-| `devices` | `device`, `dev` | org or site | `/orgs/{id}/stats/devices`, `/sites/{id}/stats/devices`, `/sites/{id}/devices/{id}`; Mist Edges are included (`--type mxedge` for only them) from `/orgs/{id}/stats/mxedges` |
+| `sites` | `site` | org | `/orgs/{id}/sites`, `/sites/{id}`, `/sites/{id}/stats`; `--sitegroup`, `--template`; `describe site X` is a health summary: counters, devices not connected, unacknowledged alarms and SLE scores over `--duration` (4 to 7 API calls) |
+| `devices` | `device`, `dev` | org or site | `/orgs/{id}/stats/devices`, `/sites/{id}/stats/devices`, `/sites/{id}/devices/{id}`; Mist Edges are included (`--type mxedge` for only them) from `/orgs/{id}/stats/mxedges`; `describe device X` adds the ports up (switches, WAN edges), the unacknowledged alarms naming the device and its last events over `--duration` (2 to 3 more API calls) |
 | `inventory` | `inv` | org or site | `/orgs/{id}/inventory`: claimed devices, assigned or not, with `--type`, `--model`, `--serial`, `--mac`, `--state assigned\|unassigned` |
 | `clients` | `client`, `cl` | org or site | A MAC seen both ways is one line with TYPE `wireless,wired` (wired records nested under `wired` in JSON); `describe client` takes a MAC or a hostname (several clients with that hostname are listed, to pick one by MAC) and shows both views unless `--type` is set. Wireless: `/sites/{id}/stats/clients` (connected now, with a site) or `/orgs/{id}/clients/search`; wired: `/orgs/{id}/wired_clients/search` or `/sites/{id}/wired_clients/search`. `--type wireless\|wired\|all`, `--duration` (default 1d) or `--start`/`--end` for searches, `--history` to search a site's wireless clients instead of listing the connected ones; filters `--mac`, `--ip`, `--text`, `--vlan`, `--device`, `--ssid`, `--username` (wireless), `--port`, `--auth-state`, `--auth-method` (wired). For wired clients the table shows only the access switch and port: inter-switch links (ports, or AE bundles, whose LLDP neighbor is an org switch, from `/orgs/{id}/stats/ports/search`, up to 20 switches), stale locations and finally the busiest ports are dropped. JSON/YAML keep every location in `device_mac_port` |
-| `nac-clients` | `nac` | org or site | `/orgs/{id}/nac_clients/search`, `/sites/{id}/nac_clients/search` with `--status`, `--mac`, `--username`, `--ssid`, `--auth-type`, `--vlan`, `--nac-rule`, `--text` |
+| `nac-clients` | `nac` | org or site | `/orgs/{id}/nac_clients/search`, `/sites/{id}/nac_clients/search` with `--status`, `--mac`, `--username`, `--ssid`, `--auth-type`, `--vlan`, `--nac-rule`, `--text`; `describe nac-client MAC` explains the last verdict: matched NAC rule with its tags by name, user MAC labels and the last authentication events (5 API calls) |
 | `wan-clients` | | org or site | `/orgs/{id}/wan_clients/search`, `/sites/{id}/wan_clients/search` with `--mac`, `--ip`, `--hostname`, `--network` |
 | `wlans` | `wlan`, `ssids` | org or site | `/orgs/{id}/wlans`; with a site, the WLANs applied to it (`/sites/{id}/wlans/derived`) |
 | `wlantemplates` | `templates` | org | `/orgs/{id}/templates` (describe lists the template's WLANs) |
@@ -120,17 +121,21 @@ mistctl get rrm --site HQ --band 5
 | `site-settings` | | site | `/sites/{id}/setting`; `--derived` for the effective settings (`/sites/{id}/setting/derived`) |
 | `deviceprofiles` | `profiles` | org | `/orgs/{id}/deviceprofiles` (one call per type, or `--type`) |
 | `sitegroups` | | org | `/orgs/{id}/sitegroups` (describe lists the sites) |
+| `licenses` | `subscriptions`, `lic` | org or site | `/orgs/{id}/licenses` (one row per license type: entitled, used, available; `-o wide` adds fully loaded, active subscriptions, next expiry), with a site `/sites/{id}/licenses/usages` (site usage next to the org entitlement) |
+| `nac-rules` | `nacrules` | org | `/orgs/{id}/nacrules` in evaluation order, NAC tags by name from `/orgs/{id}/nactags`; `describe nac-rule` resolves every referenced tag (what it matches or assigns) |
 | `alarmtemplates` | | org | `/orgs/{id}/alarmtemplates` |
 | `webhooks` | `wh` | org or site | `/orgs/{id}/webhooks`, `/sites/{id}/webhooks`; secrets and headers are redacted |
-| `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration` or `--start`/`--end`, `--sort`, `--group`, `--severity`, `--type`, `--acked`, `--ack-admin`, `--status` |
-| `events` | `ev` | org or site | device, client, system, NAC or WAN client event searches (`--source`), with `--duration` or `--start`/`--end`, `--sort`, `--type`, `--device`, `--client`, `--text`, `--ssid`, `--band`, `--reason`, `--username` |
+| `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration` or `--start`/`--end`, `--sort`, `--group`, `--severity`, `--type`, `--acked`, `--ack-admin`, `--status`. `describe alarm ID` finds the alarm in a time window (`--duration`, default 7d) and adds its definition, the current state of the affected devices, their events around the alarm, the email recipients of the alarm template, the webhooks on the `alarms` topic and the 30-day count of that alarm type (8 to 11 API calls; `--with audit` adds the config changes of the hour before) |
+| `events` | `ev` | org or site | device, client, system, NAC or WAN client event searches (`--source`, required), with `--duration` or `--start`/`--end`, `--sort`, `--type`, `--device`, `--client`, `--text`, `--ssid`, `--band`, `--reason`, `--username` |
 | `alarm-definitions`, `event-definitions` | `alarmdefs`, `eventdefs` | token | `/const/alarm_defs`, `/const/{device,client,system,nac,mxedge}_events`; they also feed `--type` completion of alarms and events |
+| `audit-logs` | `audit`, `logs` | org or site | `/orgs/{id}/logs/search` with `--duration` or `--start`/`--end`, `--sort`, `--admin`, `--text`; with a site, `site_id` is sent |
+| `config-history` | | site | `/sites/{id}/devices/config_history/search` (AP configurations pushed over `--duration` or `--start`/`--end`: version, SSIDs, channels); `--device` (filtered locally too; its site is used without `--site`), `--sort` |
 | `webhook-deliveries` | `deliveries` | org | `/orgs/{id}/webhooks/{id}/events/search` with `--webhook`, `--status`, `--topic` |
-| `sles` | | org or site | `/orgs/{id}/insights/sites-sle` (`--sle wifi\|wired\|wan`), one row per site |
+| `sles` | | org or site | `/orgs/{id}/insights/sites-sle` (`--sle wifi\|wired\|wan`), one row per site; `describe sle METRIC --site X` explains one metric: success rate and the classifiers behind the degraded part, ranked (`/sites/{id}/sle/site/{id}/metric/{metric}/summary-trend`, 1 API call), and `--with impacted` adds the most degraded clients and devices (2 more calls) |
 | `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current` (one row per band: APs per channel/power, noise, neighbors; `-o wide` adds the RF template limits, `-o json` keeps any per-AP plan under `aps`), `/sites/{id}/rrm/events` |
-| `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`) |
+| `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`); `describe mxedge` finds org-level and site-assigned Mist Edges and shows which one it is (`Scope`) |
 | `bgp-peers`, `ospf-peers` | `bgp`, `ospf` | org or site | `/stats/bgp_peers/search`, `/stats/ospf_peers/search` with `--device`, `--vrf`, `--up`, `--neighbor`/`--peer`, `--start`/`--end` |
-| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`, `--port`, `--neighbor`, `--speed`, `--poe`, `--auth-state`, `--stp-state`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port, breakout ports included (`sw-core:et-0/0/48:0`) |
+| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`, `--port`, `--neighbor`, `--speed`, `--poe`, `--auth-state`, `--stp-state`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port, breakout ports included (`sw-core:et-0/0/48:0`); `describe port DEVICE:PORT` adds the neighbor device, the device `port_config` entry, the wired clients on the port and its last events over `--duration` (3 more API calls) |
 | `zones` | | site | `/sites/{id}/stats/zones` |
 | `tunnels` | `tun` | org or site | `/orgs/{id}/stats/tunnels/search` (`--type wan\|wxtunnel`, `--device`, `--up`, `--peer`) |
 
@@ -237,7 +242,7 @@ Release packages install completions automatically.
 
 - `mistctl api <path...>`: path-style access to every GET endpoint of the Mist
   OpenAPI spec, with completion from the spec and the cache.
-- More curated resources (licenses, labels and policies,
+- More curated resources (labels and policies,
   topology/LLDP, site-level templates, ...).
 
 ## Development

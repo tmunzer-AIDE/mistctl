@@ -36,7 +36,9 @@ type listOpts struct {
 	mac        string // inventory, clients, nac/wan clients
 	state      string // inventory: assigned, unassigned
 	derived    bool   // site-settings
+	admin      string // audit-logs
 	template   string // sites
+	siteRows   bool   // licenses: set by List when the rows are a site's usage
 	// historical searches
 	start, end string
 	sortOrder  string // newest, oldest
@@ -50,6 +52,7 @@ type listOpts struct {
 	history                                bool
 	mapstack, sitegroup                    string
 	webhook, topic                         string
+	with                                   string // describe: optional sections
 }
 
 // resource is one curated Mist object type.
@@ -90,6 +93,9 @@ type resource struct {
 	// SortDesc sorts the table by this numeric field, newest first, instead
 	// of by the first column (used for time-ordered resources).
 	SortDesc string
+	// SortAsc sorts the table by this numeric field, smallest first (e.g.
+	// the evaluation order of NAC rules).
+	SortAsc string
 	// DefaultLimit is the default of --limit (0 = all).
 	DefaultLimit int
 	// FlagValues lists the accepted values of enum flags, for completion.
@@ -106,12 +112,24 @@ type resource struct {
 	DescribeArg     string
 	DescribeLong    string
 	DescribeExample string
+	// DescribeSite: describe needs a site even though get covers the org.
+	DescribeSite bool
+	// DescribeOutput replaces the default "Output:" paragraph of the
+	// describe help.
+	DescribeOutput string
 }
 
 // described is the result of `describe`.
 type described struct {
 	Header [][2]string
 	Doc    json.RawMessage
+	// Primary, when set, is the object printed in YAML after the summary
+	// instead of the whole Doc (aggregate describes show their other
+	// sections as Tables). -o json and -o yaml always print Doc.
+	Primary json.RawMessage
+	Tables  []describedTable
+	// NoYAML: the summary and its tables are the whole human output.
+	NoYAML bool
 }
 
 // nameFunc returns the -o name identifier of the resource's items.
@@ -178,10 +196,11 @@ func init() {
 		networksResource(), servicesResource(), evpnTopologiesResource(),
 		mapsResource(), mapstacksResource(),
 		orgSettingsResource(), siteSettingsResource(), deviceProfilesResource(), siteGroupsResource(),
-		alarmTemplatesResource(), webhooksResource(),
+		alarmTemplatesResource(), webhooksResource(), nacRulesResource(), licensesResource(),
 		// monitoring
 		alarmsResource(), eventsResource(), slesResource(), rrmResource(), rrmEventsResource(),
 		alarmDefinitionsResource(), eventDefinitionsResource(), webhookDeliveriesResource(),
+		auditLogsResource(), configHistoryResource(),
 		// stats
 		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(), tunnelsResource(),
 	}
@@ -193,15 +212,17 @@ func init() {
 // whose rows have no (unique) name.
 func applyNameKeys() {
 	keys := map[string][]string{
-		"clients":       {"mac"},
-		"wlans":         {"ssid", "id"},
-		"rrm":           {"band"},
-		"alarms":        {"id"},
-		"events":        {"type"},
-		"sles":          {"site_name|site_id"},
-		"rrm-events":    {"device_name|ap"},
-		"org-settings":  {"org_name|org_id"},
-		"site-settings": {"site_name|site_id"},
+		"clients":        {"mac"},
+		"wlans":          {"ssid", "id"},
+		"rrm":            {"band"},
+		"alarms":         {"id"},
+		"audit-logs":     {"id"},
+		"config-history": {"name|ap"},
+		"events":         {"type"},
+		"sles":           {"site_name|site_id"},
+		"rrm-events":     {"device_name|ap"},
+		"org-settings":   {"org_name|org_id"},
+		"site-settings":  {"site_name|site_id"},
 	}
 	joined := map[string][]string{
 		"ports":      {"device_name|mac", "port_id"},
@@ -354,52 +375,9 @@ func sitesResource() *resource {
 			}
 			return filterSites(ctx, a, items, o)
 		},
-		Describe: func(ctx context.Context, a *app, name string) (*described, error) {
-			e, err := a.lookup(ctx, kindSites, name)
-			if err != nil {
-				return nil, err
-			}
-			cl, err := a.client()
-			if err != nil {
-				return nil, err
-			}
-			id := uuid.MustParse(e.ID)
-			site, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.Site], error) {
-				return cl.SDK.Sites().GetSiteInfo(ctx, id)
-			})
-			if err != nil {
-				return nil, err
-			}
-			stats, serr := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.StatsSite], error) {
-				return cl.SDK.SitesStats().GetSiteStats(ctx, id)
-			})
-			si, s := output.Decode(site.Body), map[string]any{}
-			if serr == nil {
-				s = output.Decode(stats.Body)
-			}
-			ratio := func(conn, total string) string {
-				c, t := output.Text(s[conn]), output.Text(s[total])
-				if t == "" {
-					return ""
-				}
-				return fmt.Sprintf("%s/%s connected", orDash(c), t)
-			}
-			return (&described{
-				Header: [][2]string{
-					{"Name", output.Text(si["name"])},
-					{"ID", e.ID},
-					{"Address", output.Text(si["address"])},
-					{"Country", output.Text(si["country_code"])},
-					{"Timezone", output.Text(si["timezone"])},
-					{"APs", ratio("num_ap_connected", "num_ap")},
-					{"Switches", ratio("num_switch_connected", "num_switch")},
-					{"Gateways", ratio("num_gateway_connected", "num_gateway")},
-					{"Clients", output.Text(s["num_clients"])},
-					{"Created", ageOf(si["created_time"])},
-				},
-				Doc: combine("site", site.Body, "stats", bodyOrNil(stats, serr)),
-			}).noteUnavailable(a, "stats", serr), nil
-		},
+		Describe:       describeSite,
+		DescribeFlags:  siteDescribeFlags,
+		DescribeOutput: "a summary and its tables, followed by the site object in YAML. -o json and -o yaml print one document: site, stats, disconnected_devices, alarms and sles (one entry per SLE family).",
 	}
 }
 
@@ -551,8 +529,10 @@ func devicesResource() *resource {
 			}
 			return append(items, edges...), nil
 		},
-		Enrich:   addSiteNames,
-		Describe: describeDevice,
+		Enrich:         addSiteNames,
+		Describe:       describeDevice,
+		DescribeFlags:  deviceDescribeFlags,
+		DescribeOutput: "a summary and its tables, followed by the configuration and the stats in YAML. -o json and -o yaml print one document: config and stats, plus ports (switches and WAN edges), alarms and events.",
 	}
 }
 
@@ -600,7 +580,7 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 		return nil, err
 	}
 	if e.SiteID == "" {
-		return nil, fmt.Errorf("device %q is not assigned to a site", name)
+		return nil, fmt.Errorf("device %q is not assigned to a site: it has no configuration or stats to describe; see it with `mistctl get inventory --state unassigned -o wide`", name)
 	}
 	cl, err := a.client()
 	if err != nil {
@@ -626,7 +606,13 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 		}
 		return output.Text(c[k])
 	}
-	return (&described{
+	// the uptime of a device that is not connected is the stale value of
+	// its last connection
+	uptime := ""
+	if st := output.Text(s["status"]); st == "" || st == "connected" {
+		uptime = output.Duration(s["uptime"])
+	}
+	d := (&described{
 		Header: [][2]string{
 			{"Name", pick("name")},
 			{"ID", e.ID},
@@ -638,12 +624,15 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 			{"Status", output.Text(s["status"])},
 			{"IP", output.Text(s["ip"])},
 			{"Version", output.Text(s["version"])},
-			{"Uptime", output.Duration(s["uptime"])},
+			{"Uptime", uptime},
 			{"Last seen", ageOf(s["last_seen"])},
 			{"Clients", output.Text(s["num_clients"])},
 		},
 		Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr)),
-	}).noteUnavailable(a, "stats", serr), nil
+	}).noteUnavailable(a, "stats", serr)
+	d.Primary = d.Doc
+	enrichDevice(ctx, a, cl, d, site, sleOr(pick("mac"), e.MAC), sleOr(pick("type"), e.Type))
+	return d, nil
 }
 
 // ---- helpers --------------------------------------------------------------

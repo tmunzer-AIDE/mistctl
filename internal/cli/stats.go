@@ -24,7 +24,13 @@ var mxedgeColumns = []output.Column{
 	output.Col("STATUS", "status"),
 	output.Col("TUNNELS", "num_tunnels"),
 	output.Col("UPTIME", "uptime").WithFormat(output.Duration),
-	output.Col("SITE", "site_name", "site_id").AsWide(),
+	// an org-level Mist Edge carries the nil UUID as site_id: not a site
+	output.Col("SITE", "site_name", "site_id").WithFormat(func(v any) string {
+		if s := output.Text(v); s != uuid.Nil.String() {
+			return s
+		}
+		return ""
+	}).AsWide(),
 	output.Col("SERIAL", "serial").AsWide(),
 	output.Col("CLUSTER", "mxcluster_id").AsWide(),
 	output.Col("LAST-SEEN", "last_seen").WithFormat(output.Age).AsWide(),
@@ -81,7 +87,7 @@ func mxedgesResource() *resource {
 		Name: "mxedges", Singular: "mxedge", Aliases: []string{"mistedges", "mistedge", "me"},
 		Short:    "Mist Edges with their live status (also in `get devices`)",
 		Scope:    "org/site",
-		Endpoint: "GET /api/v1/orgs/{org_id}/stats/mxedges, GET /api/v1/sites/{site_id}/stats/mxedges, GET /api/v1/orgs/{org_id}/mxedges, GET /api/v1/orgs/{org_id}/mxedges/{mxedge_id}, GET /api/v1/orgs/{org_id}/stats/mxedges/{mxedge_id}",
+		Endpoint: "GET /api/v1/orgs/{org_id}/stats/mxedges, GET /api/v1/sites/{site_id}/stats/mxedges, GET /api/v1/orgs/{org_id}/mxedges, GET /api/v1/orgs/{org_id}/mxedges/{mxedge_id}, GET /api/v1/orgs/{org_id}/stats/mxedges/{mxedge_id}, GET /api/v1/sites/{site_id}/mxedges/{mxedge_id}, GET /api/v1/sites/{site_id}/stats/mxedges/{mxedge_id}",
 		Columns:  mxedgeColumns,
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.status, "status", "", "filter by status: connected, disconnected")
@@ -120,21 +126,38 @@ func describeMxedge(ctx context.Context, a *app, name string) (*described, error
 	if err != nil {
 		return nil, err
 	}
-	item, err := pickOne(items, name, []string{"name", "id", "mac"}, "mxedge")
+	item, err := pickOne(preferSite(ctx, a, items, name), name, []string{"name", "id", "mac"}, "mxedge")
 	if err != nil {
 		return nil, err
 	}
-	id, ok := client.ParseUUID(output.Text(output.Decode(item)["id"]))
+	listed := output.Decode(item)
+	id, ok := client.ParseUUID(output.Text(listed["id"]))
 	if !ok {
 		return nil, fmt.Errorf("mxedge %q has no ID", name)
 	}
+	// The org list (for_site=any) returns org-level and site-assigned
+	// edges alike; the listed item tells which one this is.
+	// An org-level edge carries the nil UUID as site_id.
+	site, siteEdge := client.ParseUUID(output.Text(listed["site_id"]))
+	siteEdge = siteEdge && site != uuid.Nil
+	// The org endpoints answer 404 for an edge assigned to a site (seen on
+	// a live org): its configuration and stats are read from the site.
 	cfg, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.Mxedge], error) {
+		if siteEdge {
+			// the SDK returns the bare HTTP response for this call; the
+			// body is captured by the transport either way
+			_, err := cl.SDK.SitesMxEdges().GetSiteMxEdge(ctx, site, id)
+			return models.ApiResponse[models.Mxedge]{}, err
+		}
 		return cl.SDK.OrgsMxEdges().GetOrgMxEdge(ctx, org, id)
 	})
 	if err != nil {
 		return nil, err
 	}
 	stats, serr := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.StatsMxedge], error) {
+		if siteEdge {
+			return cl.SDK.SitesStatsMxEdges().GetSiteMxEdgeStats(ctx, site, id, nil, nil, nil)
+		}
 		return cl.SDK.OrgsStatsMxEdges().GetOrgMxEdgeStats(ctx, org, id, nil)
 	})
 	c, s := output.Decode(cfg.Body), map[string]any{}
@@ -155,8 +178,13 @@ func describeMxedge(ctx context.Context, a *app, name string) (*described, error
 		{"MAC", pick("mac")},
 		{"Serial", pick("serial")},
 	}
-	if site := pick("site_id"); site != "" {
-		header = append(header, [2]string{"Site", siteLabel(a.siteNames(ctx), site)})
+	scope := "org-level"
+	if siteEdge {
+		scope = "site-level"
+	}
+	header = append(header, [2]string{"Scope", scope})
+	if siteEdge {
+		header = append(header, [2]string{"Site", siteLabel(a.siteNames(ctx), site.String())})
 	}
 	header = append(header,
 		[2]string{"Status", output.Text(s["status"])},
@@ -166,7 +194,45 @@ func describeMxedge(ctx context.Context, a *app, name string) (*described, error
 		[2]string{"Tunnels", output.Text(s["num_tunnels"])},
 		[2]string{"Services", output.Text(c["services"])},
 	)
-	return (&described{Header: header, Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr))}).noteUnavailable(a, "stats", serr), nil
+	d := &described{Header: header, Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr))}
+	if isNotFound(serr) {
+		// The edge was just listed: missing stats are worth saying, they
+		// must not read as an edge without status.
+		fmt.Fprintf(a.err, "warning: stats of this %s Mist Edge were not found\n", scope)
+		d.Header = append(d.Header, [2]string{"Stats", "not found (" + scope + " Mist Edge)"})
+		d.Doc = appendField(d.Doc, "stats_error", serr.Error())
+		return d, nil
+	}
+	return d.noteUnavailable(a, "stats", serr), nil
+}
+
+// preferSite narrows items that match q on name to those of the selected
+// site (--site or the context's) when several share the name, as
+// lookupDevice does for devices. Other cases are left to pickOne.
+func preferSite(ctx context.Context, a *app, items []json.RawMessage, q string) []json.RawMessage {
+	var same []json.RawMessage
+	for _, it := range items {
+		if strings.EqualFold(output.Text(output.Decode(it)["name"]), q) {
+			same = append(same, it)
+		}
+	}
+	if len(same) < 2 {
+		return items
+	}
+	site, ok, err := a.siteID(ctx)
+	if err != nil || !ok {
+		return items
+	}
+	var in []json.RawMessage
+	for _, it := range same {
+		if strings.EqualFold(output.Text(output.Decode(it)["site_id"]), site.String()) {
+			in = append(in, it)
+		}
+	}
+	if len(in) == 0 {
+		return items
+	}
+	return in
 }
 
 // ---- routing peers --------------------------------------------------------
@@ -434,16 +500,39 @@ func portsResource() *resource {
 		},
 		DescribeFlags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.device, "device", "", "device the port belongs to (name, ID or MAC); instead of the DEVICE: prefix")
+			addWindowFlags(fs, o, "1d", "window of the clients and of the events")
 		},
 		DescribeArg: "[DEVICE:]PORT",
-		DescribeLong: `Prints every stat of one switch or WAN edge port.
+		DescribeLong: `Prints every stat of one switch or WAN edge port, and what is around it.
 
 The port is identified by its device and its port ID, given either as one
 DEVICE:PORT argument or as PORT plus --device. DEVICE can be a device name,
 ID or MAC address. With PORT alone, the port must exist on only one device
-in the current scope (site or org).`,
+in the current scope (site or org).
+
+After the stats of the port (GET .../stats/ports/search, 1 API call), it
+adds, with 3 more API calls (up to 5 for a device with more than 1000
+events in the window):
+  - the neighbor, when it is a device of the org (from the device index)
+  - the port_config and port_config_overwrite entries of the device for
+    this port (GET /sites/{site_id}/devices/{device_id}). Most ports are
+    configured by the switch or WAN edge template of the site and have no
+    such entry: this is said, and the template rules are not evaluated
+    (the Usage line is the result)
+  - the wired clients learned on this port of this device over --duration
+    (default 1d) (GET /sites/{site_id}/wired_clients/search, first 10),
+    with the IP and VLAN seen on the port
+  - the last 10 events of the port over --duration
+    (GET /sites/{site_id}/devices/events/search for the device, filtered on
+    the port; at most 3 pages of device events are read)
+A section that cannot be read is reported and does not fail the command.
+With -o json or -o yaml the port stats stay at the top level of the
+document and gain the fields neighbor_device_name, port_config,
+port_config_overwrite, clients (each with port_entry, what was seen on this
+port) and events.`,
 		DescribeExample: `  mistctl describe port sw-core:ge-0/0/1
   mistctl describe port ge-0/0/1 --device sw-core
+  mistctl describe port sw-core:ge-0/0/1 --duration 7d
   mistctl describe port ge-0/0/1 --device 5c:5b:35:00:00:02 -o json`,
 		Describe: describePort,
 	}
@@ -576,7 +665,7 @@ func describePort(ctx context.Context, a *app, name string) (*described, error) 
 		}
 		return orDash(a) + " / " + orDash(b)
 	}
-	return &described{
+	d := &described{
 		Header: [][2]string{
 			{"Device", dev},
 			{"Port", t("port_id")},
@@ -600,8 +689,11 @@ func describePort(ctx context.Context, a *app, name string) (*described, error) 
 			{"Transceiver", strings.TrimSpace(t("xcvr_model") + " " + t("xcvr_part_number") + " " + t("xcvr_serial"))},
 			{"Last flapped", ageOf(m["last_flapped"])},
 		},
-		Doc: items[0],
-	}, nil
+		Doc:     items[0],
+		Primary: items[0],
+	}
+	enrichPort(ctx, a, d, m)
+	return d, nil
 }
 
 // ---- zones ----------------------------------------------------------------
