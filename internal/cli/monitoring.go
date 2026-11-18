@@ -66,10 +66,13 @@ func alarmsResource() *resource {
 			output.Col("NOTE", "note").AsWide(),
 			output.Col("ID", "id").AsWide(),
 		},
-		MatchKeys:    []string{"id", "type"},
-		SortDesc:     "timestamp",
-		EnrichAlways: true,
-		Enrich:       addSiteNames,
+		MatchKeys:     []string{"id", "type"},
+		Describe:      describeAlarm,
+		DescribeArg:   "ID",
+		DescribeFlags: alarmDescribeFlags,
+		SortDesc:      "timestamp",
+		EnrichAlways:  true,
+		Enrich:        addSiteNames,
 		FlagValues: map[string][]string{
 			"group":    {"infrastructure", "infra", "marvis", "security", "certificate_expiry"},
 			"severity": alarmSeverities,
@@ -211,7 +214,7 @@ func eventsResource() *resource {
 		},
 		FlagValues: map[string][]string{"source": eventSources, "band": rrmBands, "sort": sortOrders},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
-			fs.StringVar(&o.source, "source", "device", "event source: device, client (wireless), system, nac, wan (WAN edge clients)")
+			fs.StringVar(&o.source, "source", "", "event source (required): device, client (wireless), system, nac, wan (WAN edge clients)")
 			addWindowFlags(fs, o, "1d", "search window")
 			addSortFlag(fs, o)
 			fs.StringVar(&o.eventType, "type", "", "event type, e.g. AP_DISCONNECTED, SW_PORT_DOWN, CLIENT_DEAUTHENTICATED, NAC_CLIENT_DENY")
@@ -267,6 +270,11 @@ func checkEventFlags(o *listOpts) error {
 var orgEventDeviceTypes = "ap,switch,gateway"
 
 func listEvents(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+	if o.source == "" {
+		// --device and --client mean different things per source, so
+		// there is no default: the caller says which events it wants.
+		return nil, fmt.Errorf("--source is required: %s (e.g. `mistctl get events --source device`)", strings.Join(eventSources, ", "))
+	}
 	if !contains(eventSources, o.source) {
 		return nil, fmt.Errorf("invalid --source %q (valid: %s)", o.source, strings.Join(eventSources, ", "))
 	}

@@ -97,7 +97,7 @@ them restricts the list to that type.`,
 		short:            "Mist Edges with their live status",
 		about:            "Mist Edges are also part of `get devices` (type mxedge).",
 		examples:         []string{"get mxedges", "get mxedges --status disconnected -o wide"},
-		describe:         "Prints the Mist Edge configuration and its live stats. NAME can be a name, ID or MAC address.",
+		describe:         "Prints the Mist Edge configuration and its live stats. NAME can be a name, ID or MAC address. Org-level Mist Edges and Mist Edges assigned to a site are both found, whatever the site; Scope says which one it is. When two Mist Edges share a name, --site (or the site of the context) picks the one assigned to that site. Cost: 3 API calls.",
 		describeOrgWide:  true,
 		describeExamples: []string{"describe mxedge edge-01"},
 	},
@@ -296,14 +296,23 @@ only that site.`,
 			"get alarms --group marvis --duration 7d -o wide",
 			"get alarms --type switch_down --start 2026-11-16 --end 2026-11-17",
 		},
+		describe: "Prints one alarm with its context. ID is the alarm ID (`mistctl get alarms -o wide` shows it, `-o name` prints only IDs). Mist has no API to read one alarm, so the alarm is searched over --duration (default 7d) or --start/--end; widen the window for an older alarm (the window is matched against the time the alarm was first seen, not last seen). The summary adds the alarm definition, the current state of the affected devices, their events from 15 minutes before the alarm to 15 minutes after it was last seen (24h at most), the email recipients of the alarm template in force (the site's, else the org's), the enabled webhooks on the alarms topic (secrets redacted) and how many alarms of this type were raised in 30 days. --with audit adds the configuration changes of the hour before the alarm. Cost: 8 to 11 API calls, one more per 1000 alarms in the window and per 1000 devices on the site. A section that cannot be read is reported and does not fail the command. In the summary the sections are tables and only the alarm is printed in YAML; -o json and -o yaml print one document with a key per section (alarm, definition, devices, events, notification, webhooks, recurrence, audit).",
+		describeExamples: []string{
+			"describe alarm 7f1c0d9e-3a52-4c1b-9d0e-5b6a7c8d9e0f",
+			"describe alarm 7f1c0d9e-3a52-4c1b-9d0e-5b6a7c8d9e0f -A --duration 30d",
+			"describe alarm 7f1c0d9e-3a52-4c1b-9d0e-5b6a7c8d9e0f --with audit -o json",
+		},
 	},
 	"events": {
 		group: "monitoring", title: "event",
 		short: "Device, client, system, NAC or WAN client events during a time window",
 		about: `Searches events during --duration (default 1d), or between --start and
---end, newest first. --source picks the kind of events: device (default),
+--end, newest first. --source picks the kind of events: device,
 client (wireless client events), system (configuration and audit-style
 events), nac (Mist NAC authentications) or wan (clients of WAN edges).
+--source is required: --device and --client do not mean the same thing for
+every source (for client and NAC events --device is the AP), so mistctl
+does not guess.
 --limit caps the number of events shown (default 1000, the newest ones);
 pass --limit 0 for all of them.
 
@@ -313,9 +322,10 @@ system events: those are applied locally, and mistctl reads further pages
 until --limit matching events are found.
 ` + "`mistctl get event-definitions --source SOURCE`" + ` lists the event types.`,
 		examples: []string{
-			"get events --site HQ",
-			"get events -A --device sw-core --type SW_PORT_DOWN --duration 7d",
+			"get events --source device --site HQ",
+			"get events --source device -A --device sw-core --type SW_PORT_DOWN --duration 7d",
 			"get events --source client --site HQ --client aa:bb:cc:dd:ee:ff --band 5",
+			"get events --source client --site HQ --device ap-lobby-01",
 			"get events --source client -A --type CLIENT_DEAUTHENTICATED --reason 15",
 			"get events --source nac --client aa:bb:cc:dd:ee:ff --type NAC_CLIENT_DENY",
 			"get events --source wan -A --duration 4h",
@@ -364,6 +374,24 @@ error of each attempt.`,
 			"get webhook-deliveries --webhook splunk-alarms",
 			"get webhook-deliveries --webhook splunk-alarms --status failure --duration 7d",
 			"get webhook-deliveries --webhook splunk-alarms --topic alarms -o yaml",
+		},
+	},
+	"audit-logs": {
+		group: "monitoring", title: "audit log entry",
+		short: "Administrator actions (configuration changes, logins) during a time window",
+		about: `Searches the org audit log during --duration (default 1d), or between
+--start and --end, newest first: who changed what, and when. With --site,
+only the entries of that site (org-level changes have no site); without a
+site, or with -A, the whole org. --admin and --text are applied by the
+API: --admin matches the administrator name, --text the message.
+-o yaml shows the configuration before and after each change, when Mist
+recorded it. --limit caps the number of entries shown (default 1000, the
+newest ones); pass --limit 0 for all of them.`,
+		examples: []string{
+			"get audit-logs --site HQ --duration 2h",
+			"get audit-logs -A --admin \"Jane Doe\" --duration 7d",
+			"get audit-logs -A --text \"Update WLAN\" -o wide",
+			"get audit-logs --site HQ --start 2026-11-16T08:00 --end 2026-11-16T12:00 -o yaml",
 		},
 	},
 	"tunnels": {

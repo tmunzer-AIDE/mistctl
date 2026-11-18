@@ -79,7 +79,7 @@ func TestClientEventFilters(t *testing.T) {
 	if len(c) != 1 || !strings.Contains(c[0], "ssid=Corp") || !strings.Contains(c[0], "band=5") || !strings.Contains(c[0], "reason_code=15") {
 		t.Errorf("client event filters not sent: %v", c)
 	}
-	run(t, "get", "events", "--text", "heartbeat")
+	run(t, "get", "events", "--source", "device", "--text", "heartbeat")
 	if c := fake.called("/api/v1/orgs/" + orgID + "/devices/events/search"); len(c) != 1 || !strings.Contains(c[0], "text=heartbeat") {
 		t.Errorf("--text not sent: %v", c)
 	}

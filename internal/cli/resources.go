@@ -35,6 +35,7 @@ type listOpts struct {
 	mac        string // inventory, clients, nac/wan clients
 	state      string // inventory: assigned, unassigned
 	derived    bool   // site-settings
+	admin      string // audit-logs
 	template   string // sites
 	// historical searches
 	start, end string
@@ -49,6 +50,7 @@ type listOpts struct {
 	history                                bool
 	mapstack, sitegroup                    string
 	webhook, topic                         string
+	with                                   string // describe: optional sections
 }
 
 // resource is one curated Mist object type.
@@ -111,6 +113,11 @@ type resource struct {
 type described struct {
 	Header [][2]string
 	Doc    json.RawMessage
+	// Primary, when set, is the object printed in YAML after the summary
+	// instead of the whole Doc (aggregate describes show their other
+	// sections as Tables). -o json and -o yaml always print Doc.
+	Primary json.RawMessage
+	Tables  []describedTable
 }
 
 // nameFunc returns the -o name identifier of the resource's items.
@@ -181,6 +188,7 @@ func init() {
 		// monitoring
 		alarmsResource(), eventsResource(), slesResource(), rrmResource(), rrmEventsResource(),
 		alarmDefinitionsResource(), eventDefinitionsResource(), webhookDeliveriesResource(),
+		auditLogsResource(),
 		// stats
 		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(), tunnelsResource(),
 	}
@@ -196,6 +204,7 @@ func applyNameKeys() {
 		"wlans":         {"ssid", "id"},
 		"rrm":           {"band"},
 		"alarms":        {"id"},
+		"audit-logs":    {"id"},
 		"events":        {"type"},
 		"sles":          {"site_name|site_id"},
 		"rrm-events":    {"device_name|ap"},
