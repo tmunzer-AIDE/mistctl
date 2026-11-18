@@ -136,8 +136,9 @@ func clientHostnames(m map[string]any) []string {
 
 // resolveClientHostname returns the MAC of the one client whose hostname is
 // name (any case). Several clients with that hostname is an error that
-// lists them, so the user can pick one by MAC. Each MAC is labelled with
-// the client types whose records carry that hostname.
+// lists them, so the user can pick one by MAC. (Client types are not shown:
+// they only say which records carry the hostname, not how the client
+// connects.)
 func resolveClientHostname(ctx context.Context, a *app, name string, w window, dur string) (string, error) {
 	found, err := searchClientHostnames(ctx, a, name, w, hostnameResolveLimit)
 	if err != nil {
@@ -177,7 +178,7 @@ func resolveClientHostname(ctx context.Context, a *app, name string, w window, d
 	}
 	lines := make([]string, 0, len(macs))
 	for _, m := range macs {
-		lines = append(lines, fmt.Sprintf("  %s (%s)", m, strings.Join(kinds[m], ",")))
+		lines = append(lines, "  "+m)
 	}
 	return "", fmt.Errorf("hostname %q matches %d clients seen in the last %s:\n%s\ndescribe one of them by MAC address", name, len(macs), dur, strings.Join(lines, "\n"))
 }
@@ -230,7 +231,7 @@ func completeClientNames(a *app, cmd *cobra.Command, toComplete string) []string
 	out := make([]string, 0, len(order))
 	for _, k := range order {
 		e := byName[k]
-		desc := e.macs[0] + " " + strings.Join(e.kind, ",")
+		desc := e.macs[0]
 		if len(e.macs) > 1 {
 			desc = fmt.Sprintf("%d clients", len(e.macs))
 		}

@@ -67,7 +67,7 @@ func TestDescribeClientHostnameAmbiguous(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a hostname shared by two clients")
 	}
-	for _, want := range []string{`hostname "printer" matches 2 clients`, "001122334455 (wired)", "0a0b0c0d0e02 (wireless)", "by MAC address"} {
+	for _, want := range []string{`hostname "printer" matches 2 clients`, "  001122334455\n", "  0a0b0c0d0e02\n", "by MAC address"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
@@ -94,7 +94,7 @@ func TestDescribeClientHostnameNotFound(t *testing.T) {
 func TestCompleteClientNames(t *testing.T) {
 	m := setupRoutes(t, hostnameRoutes())
 	out := run(t, "__complete", "describe", "client", "LAP")
-	assertContains(t, out, "LAPTOP-JDOE\taabbccddeeff wireless", "laptop-jdoe2\t")
+	assertContains(t, out, "LAPTOP-JDOE\taabbccddeeff\n", "laptop-jdoe2\t")
 	if strings.Contains(out, "printer") {
 		t.Errorf("completion offers names not starting with the prefix:\n%s", out)
 	}
