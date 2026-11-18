@@ -6,7 +6,8 @@
 # Usage: scripts/release.sh <command> [args]
 #
 #   doctor                 show what is set up and what is missing
-#   repos                  create homebrew-tap and scoop-bucket, fork winget-pkgs
+#   repos                  create homebrew-tap and scoop-bucket (and sync their
+#                          README), fork winget-pkgs
 #   release <vX.Y.Z>       test, tag, push the tag, then build, sign, notarize
 #                          and publish a draft release with GoReleaser
 #   publish <vX.Y.Z>       publish the draft GitHub release
@@ -118,14 +119,20 @@ create_package_repo() {
     gh repo create "$repo" --public --description "$desc" >/dev/null
     ok "created $repo"
   fi
-  # GoReleaser cannot push to an empty repository: make sure a README exists.
-  if gh api "repos/$repo/contents/README.md" >/dev/null 2>&1; then
-    ok "$repo has a README"
-  else
-    content=$(base64 <"$readme" | tr -d '\n')
+  # GoReleaser cannot push to an empty repository, so the README is created
+  # with the repo; it is then kept in sync with packaging/<repo>/README.md.
+  content=$(base64 <"$readme" | tr -d '\n')
+  sha=$(gh api "repos/$repo/contents/README.md" --jq .sha 2>/dev/null || true)
+  if [ -z "$sha" ]; then
     gh api -X PUT "repos/$repo/contents/README.md" \
       -f message="Add README" -f content="$content" >/dev/null
     ok "added README to $repo"
+  elif [ "$(gh api "repos/$repo/contents/README.md" -H "Accept: application/vnd.github.raw")" = "$(cat "$readme")" ]; then
+    ok "$repo README is up to date"
+  else
+    gh api -X PUT "repos/$repo/contents/README.md" \
+      -f message="Update README" -f content="$content" -f sha="$sha" >/dev/null
+    ok "updated README of $repo"
   fi
 }
 
@@ -236,5 +243,5 @@ case "$command" in
   release) cmd_release "$@" ;;
   publish) cmd_publish "$@" ;;
   winget-pr) cmd_winget_pr "$@" ;;
-  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -37,7 +37,7 @@ snapshot: ## Local release dry run into dist/ (no signing, nothing published)
 release-doctor: ## Check tools, signing identity, notary profile and repos
 	@$(RELEASE) doctor
 
-release-repos: ## Create homebrew-tap and scoop-bucket, fork winget-pkgs
+release-repos: ## Create homebrew-tap and scoop-bucket (syncs their README), fork winget-pkgs
 	@$(RELEASE) repos
 
 ## Releasing (on your Mac)
