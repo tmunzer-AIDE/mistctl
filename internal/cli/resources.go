@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/tmunzer/mistapi-go/mistapi/models"
 
@@ -65,9 +66,12 @@ type resource struct {
 	Columns  []output.Column
 	// IndexKind enables name completion/resolution from the cache.
 	IndexKind string
-	Flags     func(fs *pflag.FlagSet, o *listOpts)
-	List      func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error)
-	Describe  func(ctx context.Context, a *app, name string) (*described, error)
+	// CompleteNames completes NAME for resources that are not in the
+	// cache (clients); it takes precedence over IndexKind.
+	CompleteNames func(a *app, cmd *cobra.Command, toComplete string) []string
+	Flags         func(fs *pflag.FlagSet, o *listOpts)
+	List          func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error)
+	Describe      func(ctx context.Context, a *app, name string) (*described, error)
 	// DescribeFlags adds resource-specific flags to `describe`; values are
 	// available to Describe through a.describeOpts.
 	DescribeFlags func(fs *pflag.FlagSet, o *listOpts)

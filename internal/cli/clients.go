@@ -69,7 +69,8 @@ func clientsResource() *resource {
 			fs.StringVar(&o.authState, "auth-state", "", "wired only: 802.1X/MAB state, e.g. authenticated, unauthenticated")
 			fs.StringVar(&o.authType, "auth-method", "", "wired only: authentication method, e.g. dot1x, mab")
 		},
-		List: listClients,
+		List:          listClients,
+		CompleteNames: completeClientNames,
 		DescribeFlags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.clientType, "type", "all", "client type: all, wireless, wired")
 			fs.StringVar(&o.duration, "duration", "7d", "how far back the org-wide client search looks (e.g. 1d, 7d, 2w)")
@@ -368,9 +369,6 @@ var errClientNotFound = errors.New("client not found")
 // describeClient shows the wireless and/or wired view of a MAC. With
 // --type all (default) both are looked up and merged when both exist.
 func describeClient(ctx context.Context, a *app, name string) (*described, error) {
-	if !cache.IsMAC(name) {
-		return nil, fmt.Errorf("clients are identified by MAC address, got %q", name)
-	}
 	t, dur := "all", "7d"
 	if o := a.describeOpts; o != nil {
 		if o.clientType != "" {
@@ -387,7 +385,12 @@ func describeClient(ctx context.Context, a *app, name string) (*described, error
 	if err != nil {
 		return nil, err
 	}
-	mac := cache.NormalizeMAC(name)
+	var mac string
+	if cache.IsMAC(name) {
+		mac = cache.NormalizeMAC(name)
+	} else if mac, err = resolveClientHostname(ctx, a, name, w, dur); err != nil {
+		return nil, err
+	}
 	var wl, wd *described
 	if t != "wired" {
 		if wl, err = describeWireless(ctx, a, mac, w); err != nil && !errors.Is(err, errClientNotFound) {
@@ -581,7 +584,7 @@ func describeWired(ctx context.Context, a *app, mac string, w window) (*describe
 	}
 	return &described{
 		Header: [][2]string{
-			{"Hostname", output.Text(m["dhcp_hostname"])},
+			{"Hostname", firstText(m, "last_hostname", "dhcp_hostname", "hostname")},
 			{"MAC", mac},
 			{"Type", "wired"},
 			{"Site", siteLabel(a.siteNames(ctx), output.Text(m["site_id"]))},

@@ -76,6 +76,7 @@ mistctl get clients --site HQ
 mistctl get clients --type wired -A --duration 7d
 mistctl describe device ap-lobby
 mistctl describe client aa:bb:cc:dd:ee:ff -o json
+mistctl describe client LAPTOP-JDOE
 mistctl get wlans --site HQ
 mistctl get alarms --group infra --severity critical --duration 7d
 mistctl get events --source device --device sw-core --type SW_PORT_DOWN
@@ -108,7 +109,7 @@ mistctl get rrm --site HQ --band 5
 | `sites` | `site` | org | `/orgs/{id}/sites`, `/sites/{id}`, `/sites/{id}/stats`; `--sitegroup`, `--template`; `describe site X` is a health summary: counters, devices not connected, unacknowledged alarms and SLE scores over `--duration` (4 to 7 API calls) |
 | `devices` | `device`, `dev` | org or site | `/orgs/{id}/stats/devices`, `/sites/{id}/stats/devices`, `/sites/{id}/devices/{id}`; Mist Edges are included (`--type mxedge` for only them) from `/orgs/{id}/stats/mxedges`; `describe device X` adds the ports up (switches, WAN edges), the unacknowledged alarms naming the device and its last events over `--duration` (2 to 3 more API calls) |
 | `inventory` | `inv` | org or site | `/orgs/{id}/inventory`: claimed devices, assigned or not, with `--type`, `--model`, `--serial`, `--mac`, `--state assigned\|unassigned` |
-| `clients` | `client`, `cl` | org or site | A MAC seen both ways is one line with TYPE `wireless,wired` (wired records nested under `wired` in JSON); `describe client` shows both unless `--type` is set. Wireless: `/sites/{id}/stats/clients` (connected now, with a site) or `/orgs/{id}/clients/search`; wired: `/orgs/{id}/wired_clients/search` or `/sites/{id}/wired_clients/search`. `--type wireless\|wired\|all`, `--duration` (default 1d) or `--start`/`--end` for searches, `--history` to search a site's wireless clients instead of listing the connected ones; filters `--mac`, `--ip`, `--text`, `--vlan`, `--device`, `--ssid`, `--username` (wireless), `--port`, `--auth-state`, `--auth-method` (wired). For wired clients the table shows only the access switch and port: inter-switch links (ports, or AE bundles, whose LLDP neighbor is an org switch, from `/orgs/{id}/stats/ports/search`, up to 20 switches), stale locations and finally the busiest ports are dropped. JSON/YAML keep every location in `device_mac_port` |
+| `clients` | `client`, `cl` | org or site | A MAC seen both ways is one line with TYPE `wireless,wired` (wired records nested under `wired` in JSON); `describe client` takes a MAC or a hostname (several clients with that hostname are listed, to pick one by MAC) and shows both views unless `--type` is set. Wireless: `/sites/{id}/stats/clients` (connected now, with a site) or `/orgs/{id}/clients/search`; wired: `/orgs/{id}/wired_clients/search` or `/sites/{id}/wired_clients/search`. `--type wireless\|wired\|all`, `--duration` (default 1d) or `--start`/`--end` for searches, `--history` to search a site's wireless clients instead of listing the connected ones; filters `--mac`, `--ip`, `--text`, `--vlan`, `--device`, `--ssid`, `--username` (wireless), `--port`, `--auth-state`, `--auth-method` (wired). For wired clients the table shows only the access switch and port: inter-switch links (ports, or AE bundles, whose LLDP neighbor is an org switch, from `/orgs/{id}/stats/ports/search`, up to 20 switches), stale locations and finally the busiest ports are dropped. JSON/YAML keep every location in `device_mac_port` |
 | `nac-clients` | `nac` | org or site | `/orgs/{id}/nac_clients/search`, `/sites/{id}/nac_clients/search` with `--status`, `--mac`, `--username`, `--ssid`, `--auth-type`, `--vlan`, `--nac-rule`, `--text`; `describe nac-client MAC` explains the last verdict: matched NAC rule with its tags by name, user MAC labels and the last authentication events (5 API calls) |
 | `wan-clients` | | org or site | `/orgs/{id}/wan_clients/search`, `/sites/{id}/wan_clients/search` with `--mac`, `--ip`, `--hostname`, `--network` |
 | `wlans` | `wlan`, `ssids` | org or site | `/orgs/{id}/wlans`; with a site, the WLANs applied to it (`/sites/{id}/wlans/derived`) |
@@ -267,6 +268,10 @@ names without spending API budget. Indexes refresh after `cache-ttl` (default
 10 minutes) or when a name is not found. Tokens are never written to the cache.
 Override the directory with `$MISTCTL_CACHE_DIR`; `mistctl cache clear` only
 deletes the index files mistctl wrote there, never other files.
+
+Clients are not cached: completing a client name (`describe client <TAB>`)
+runs one org-wide client search per client type over `--duration` (default 7d
+for `describe`), matching hostnames that start with what was typed.
 
 ```sh
 # bash
