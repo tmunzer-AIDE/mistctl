@@ -19,7 +19,7 @@ func portRoutes() map[string]http.HandlerFunc {
 			{"mac":"aabbccddeeff","ip":["10.0.1.5","10.9.9.9"],"vlan":[10,99],"manufacture":"Acme","auth_state":"authenticated","timestamp":1790000000,
 				"device_mac":["5c5b35000002","5c5b35000009"],"port_id":["ge-0/0/5","xe-0/1/3"],"device_mac_port":[
 				{"device_mac":"5c5b35000009","port_id":"xe-0/1/3","ip":"10.9.9.9","vlan":99},
-				{"device_mac":"5c5b35000002","port_id":"ge-0/0/5","ip":"10.0.1.5","vlan":10,"when":"2026-01-01T00:00:00Z"}]},
+				{"device_mac":"5c5b35000002","port_id":"ge-0/0/5","ip":"10.0.1.5","vlan":10,"when":"2026-01-01T00:00:00.139+0000"}]},
 			{"mac":"001122334455","manufacture":"Elsewhere","device_mac":["5c5b35000002","5c5b35000009"],"port_id":["xe-0/1/3","ge-0/0/5"],"device_mac_port":[
 				{"device_mac":"5c5b35000002","port_id":"xe-0/1/3"},{"device_mac":"5c5b35000009","port_id":"ge-0/0/5"}]}],"total":2}`),
 		site + "/devices/events/search": body(`{"results":[
@@ -37,12 +37,12 @@ func TestDescribePortEnriched(t *testing.T) {
 		"Configured:", `usage ap, description APs (device port_config "ge-0/0/1,ge-0/0/4-7"); poe_disabled true (device port_config_overwrite "ge-0/0/5, ge-0/0/6")`,
 		"Clients:", "1 learned in the last 1d",
 		"Events:", "1 in the last 1d",
-		"Wired clients on the port:", "aabbccddeeff", "10.0.1.5", "Acme", "authenticated",
+		"Wired clients on the port:", "SEEN-ON-PORT", "aabbccddeeff", "10.0.1.5", "Acme", "authenticated",
 		"Events of the port, newest first:", "SW_PORT_DOWN", "link down xxx", "xxx...",
 		"port_usage: ap") // the port stats still follow in YAML
 	// a client of the same port ID on another switch, the IPs and VLANs seen
 	// elsewhere, false booleans and overlong texts stay out
-	assertNotContains(t, out, "other port", "no port", "unavailable", "clients:", "Elsewhere", "10.9.9.9", "99", "critical", strings.Repeat("x", 120))
+	assertNotContains(t, out, "other port", "no port", "unavailable", "clients:", "Elsewhere", "10.9.9.9", "99", "critical", "2026-01-01", strings.Repeat("x", 120))
 	// the clients are searched on this device and port, over 1d
 	c := f.called("/api/v1/sites/" + siteHQ + "/wired_clients/search")
 	if len(c) != 1 || !strings.Contains(c[0], "device_mac=5c5b35000002") || !strings.Contains(c[0], "port_id=ge-0%2F0%2F5") || windowOf(c[0]) != 86400 {
@@ -82,6 +82,17 @@ func TestDescribePortSections(t *testing.T) {
 		"Events:", "unavailable: ", // a failing section does not fail the command
 		"port_usage: ap")
 	assertNotContains(t, out, "Wired clients on the port:")
+}
+
+func TestWhenAge(t *testing.T) {
+	for _, v := range []string{"2026-01-01T00:00:00.139+0000", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00+01:00"} {
+		if got := whenAge(v); got == "" || strings.Contains(got, "2026") {
+			t.Errorf("whenAge(%q) = %q, want an age", v, got)
+		}
+	}
+	if got := whenAge("soon"); got != "soon" {
+		t.Errorf("whenAge keeps what it cannot parse, got %q", got)
+	}
 }
 
 func TestPortInSpec(t *testing.T) {

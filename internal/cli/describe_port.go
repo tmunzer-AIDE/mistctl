@@ -228,8 +228,11 @@ func portInSpec(port, spec string) bool {
 // whenAge renders a timestamp given as epoch seconds or RFC 3339 as an age.
 func whenAge(v any) string {
 	t := output.Text(v)
-	if ts, err := time.Parse(time.RFC3339, t); err == nil {
-		return output.Age(json.Number(strconv.FormatInt(ts.Unix(), 10)))
+	// Mist writes these as 2026-11-18T06:46:02.139+0000
+	for _, layout := range []string{"2006-01-02T15:04:05.999999999Z0700", time.RFC3339Nano} {
+		if ts, err := time.Parse(layout, t); err == nil {
+			return output.HumanDuration(time.Since(ts))
+		}
 	}
 	if _, err := strconv.ParseFloat(t, 64); err == nil {
 		return output.Age(v)
