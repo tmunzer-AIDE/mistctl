@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tmunzer/mistapi-go/mistapi/models"
@@ -69,43 +70,76 @@ func enrichPort(ctx context.Context, a *app, d *described, m map[string]any) {
 		case cerr != nil:
 			note("port_config", "Configured", cerr)
 		default:
-			cfg, _ := output.Decode(dev.Body)["port_config"].(map[string]any)
-			line := "no port_config entry on the device for this port (a template or the defaults apply)"
-			keys := make([]string, 0, len(cfg))
-			for key := range cfg {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
-			for _, key := range keys {
-				if !portInSpec(port, key) {
-					continue
+			conf := output.Decode(dev.Body)
+			var lines []string
+			// port_config_overwrite holds the local changes to a port that a
+			// template configures
+			for _, section := range []string{"port_config", "port_config_overwrite"} {
+				cfg, _ := conf[section].(map[string]any)
+				keys := make([]string, 0, len(cfg))
+				for key := range cfg {
+					keys = append(keys, key)
 				}
-				pc, _ := cfg[key].(map[string]any)
-				parts := []string{"usage " + orDash(output.Text(pc["usage"]))}
-				for _, k := range []string{"description", "aggregated", "ae_idx", "disabled", "speed", "poe_disabled", "critical", "dynamic_usage"} {
-					if t := output.Text(pc[k]); t != "" {
-						parts = append(parts, k+" "+t)
+				sort.Strings(keys)
+				for _, key := range keys {
+					if !portInSpec(port, key) {
+						continue
 					}
+					pc, _ := cfg[key].(map[string]any)
+					var parts []string
+					if u := output.Text(pc["usage"]); u != "" {
+						parts = append(parts, "usage "+u)
+					}
+					for _, k := range []string{"description", "aggregated", "ae_idx", "disabled", "speed", "poe_disabled", "critical", "dynamic_usage"} {
+						if t := output.Text(pc[k]); t != "" && t != "false" {
+							parts = append(parts, k+" "+t)
+						}
+					}
+					lines = append(lines, fmt.Sprintf("%s (device %s %q)", strings.Join(parts, ", "), section, key))
+					d.Doc = appendField(d.Doc, section, map[string]any{"key": key, "config": pc})
+					break
 				}
-				line = fmt.Sprintf("%s (device port_config %q)", strings.Join(parts, ", "), key)
-				d.Doc = appendField(d.Doc, "port_config", map[string]any{"key": key, "config": pc})
-				break
 			}
-			d.Header = append(d.Header, [2]string{"Configured", line})
+			if len(lines) == 0 || !strings.Contains(lines[0], "(device port_config ") {
+				lines = append([]string{"not set on the device itself: the switch or WAN edge template of the site applies, if it covers this port (the Usage above is the result)"}, lines...)
+			}
+			d.Header = append(d.Header, [2]string{"Configured", strings.Join(lines, "; ")})
 		}
 	}
 
-	// wired clients learned on the port
-	clients, err := client.SearchFiltered(ctx, maxPortRows, nil, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
-		return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
-			return cl.SDK.SitesClientsWired().SearchSiteWiredClients(ctx, site, &mac, nil, nil, &port, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
+	// wired clients learned on the port. The search matches device_mac and
+	// port_id independently (a client of port X on another switch matches
+	// when it also crosses this device), so the pair is checked locally in
+	// device_mac_port, which also gives the IP and VLAN seen on this port.
+	pages, cut := 0, false
+	onPort := func(it json.RawMessage) map[string]any {
+		entries, _ := output.Decode(it)["device_mac_port"].([]any)
+		for _, e := range entries {
+			pe, _ := e.(map[string]any)
+			if cache.NormalizeMAC(output.Text(pe["device_mac"])) == mac && (output.Text(pe["port_id"]) == port || output.Text(pe["port_parent"]) == port) {
+				return pe
+			}
+		}
+		return nil
+	}
+	clients, err := client.SearchFiltered(ctx, maxPortRows, func(it json.RawMessage) bool { return onPort(it) != nil },
+		func(ctx context.Context, limit int, after *string) (client.Raw, error) {
+			if pages++; pages > maxPortEventPages {
+				cut = true
+				return client.Raw{Body: json.RawMessage(`{"results":[]}`)}, nil
+			}
+			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
+				return cl.SDK.SitesClientsWired().SearchSiteWiredClients(ctx, site, &mac, nil, nil, &port, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, after)
+			})
 		})
-	})
 	if err != nil {
 		note("clients", "Clients", err)
 	} else {
 		if clients == nil {
 			clients = []json.RawMessage{}
+		}
+		for i, it := range clients {
+			clients[i] = appendField(it, "port_entry", onPort(it))
 		}
 		d.Doc = appendField(d.Doc, "clients", clients)
 		line := "none learned in the last " + span
@@ -116,19 +150,22 @@ func enrichPort(ctx context.Context, a *app, d *described, m map[string]any) {
 			}
 			d.Tables = append(d.Tables, describedTable{Title: "Wired clients on the port", Rows: clients, Cols: []output.Column{
 				output.Col("MAC", "mac"),
-				output.Col("IP", "ip"),
-				output.Col("VLAN", "vlan"),
-				output.Col("HOSTNAME", "hostname", "dhcp_hostname", "dhcp_fqdn"),
+				output.Col("IP", "port_entry.ip", "last_ip"),
+				output.Col("VLAN", "port_entry.vlan", "last_vlan"),
+				output.Col("HOSTNAME", "last_hostname", "hostname"),
 				output.Col("MANUFACTURER", "manufacture"),
 				output.Col("AUTH", "auth_state"),
-				output.Col("LAST-SEEN", "timestamp").WithFormat(output.Age),
+				output.Col("SEEN-ON-PORT", "port_entry.when").WithFormat(whenAge),
 			}})
+		}
+		if cut {
+			line += fmt.Sprintf(" (only the first %d matches of the search were checked)", maxPortEventPages*client.PageSize)
 		}
 		d.Header = append(d.Header, [2]string{"Clients", line})
 	}
 
 	// the last events of the port: the device's events, filtered locally
-	pages, cut := 0, false
+	pages, cut = 0, false
 	events, err := client.SearchFiltered(ctx, maxPortRows, func(it json.RawMessage) bool {
 		return output.Text(output.Decode(it)["port_id"]) == port
 	}, func(ctx context.Context, limit int, after *string) (client.Raw, error) {
@@ -157,7 +194,7 @@ func enrichPort(ctx context.Context, a *app, d *described, m map[string]any) {
 		d.Tables = append(d.Tables, describedTable{Title: "Events of the port, newest first", Rows: events, Cols: []output.Column{
 			output.Col("AGE", "timestamp").WithFormat(output.Age),
 			output.Col("TYPE", "type"),
-			output.Col("TEXT", "text"),
+			output.Col("TEXT", "text").WithFormat(shortText),
 		}})
 	}
 	if cut {
@@ -186,4 +223,25 @@ func portInSpec(port, spec string) bool {
 		}
 	}
 	return false
+}
+
+// whenAge renders a timestamp given as epoch seconds or RFC 3339 as an age.
+func whenAge(v any) string {
+	t := output.Text(v)
+	if ts, err := time.Parse(time.RFC3339, t); err == nil {
+		return output.Age(json.Number(strconv.FormatInt(ts.Unix(), 10)))
+	}
+	if _, err := strconv.ParseFloat(t, 64); err == nil {
+		return output.Age(v)
+	}
+	return t
+}
+
+// shortText keeps a table cell on one readable line.
+func shortText(v any) string {
+	t := strings.Join(strings.Fields(output.Text(v)), " ")
+	if r := []rune(t); len(r) > 100 {
+		return string(r[:97]) + "..."
+	}
+	return t
 }

@@ -514,18 +514,22 @@ After the stats of the port (GET .../stats/ports/search, 1 API call), it
 adds, with 3 more API calls (up to 5 for a device with more than 1000
 events in the window):
   - the neighbor, when it is a device of the org (from the device index)
-  - the port_config entry of the device for this port
-    (GET /sites/{site_id}/devices/{device_id}); a port configured only by a
-    switch template has no such entry, and that is said
-  - the wired clients learned on the port over --duration (default 1d)
-    (GET /sites/{site_id}/wired_clients/search, first 10)
+  - the port_config and port_config_overwrite entries of the device for
+    this port (GET /sites/{site_id}/devices/{device_id}). Most ports are
+    configured by the switch or WAN edge template of the site and have no
+    such entry: this is said, and the template rules are not evaluated
+    (the Usage line is the result)
+  - the wired clients learned on this port of this device over --duration
+    (default 1d) (GET /sites/{site_id}/wired_clients/search, first 10),
+    with the IP and VLAN seen on the port
   - the last 10 events of the port over --duration
     (GET /sites/{site_id}/devices/events/search for the device, filtered on
     the port; at most 3 pages of device events are read)
 A section that cannot be read is reported and does not fail the command.
 With -o json or -o yaml the port stats stay at the top level of the
-document and gain the fields neighbor_device_name, port_config, clients and
-events.`,
+document and gain the fields neighbor_device_name, port_config,
+port_config_overwrite, clients (each with port_entry, what was seen on this
+port) and events.`,
 		DescribeExample: `  mistctl describe port sw-core:ge-0/0/1
   mistctl describe port ge-0/0/1 --device sw-core
   mistctl describe port sw-core:ge-0/0/1 --duration 7d
