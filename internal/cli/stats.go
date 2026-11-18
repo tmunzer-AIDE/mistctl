@@ -81,7 +81,7 @@ func mxedgesResource() *resource {
 		Name: "mxedges", Singular: "mxedge", Aliases: []string{"mistedges", "mistedge", "me"},
 		Short:    "Mist Edges with their live status (also in `get devices`)",
 		Scope:    "org/site",
-		Endpoint: "GET /api/v1/orgs/{org_id}/stats/mxedges, GET /api/v1/sites/{site_id}/stats/mxedges, GET /api/v1/orgs/{org_id}/mxedges, GET /api/v1/orgs/{org_id}/mxedges/{mxedge_id}, GET /api/v1/orgs/{org_id}/stats/mxedges/{mxedge_id}",
+		Endpoint: "GET /api/v1/orgs/{org_id}/stats/mxedges, GET /api/v1/sites/{site_id}/stats/mxedges, GET /api/v1/orgs/{org_id}/mxedges, GET /api/v1/orgs/{org_id}/mxedges/{mxedge_id}, GET /api/v1/orgs/{org_id}/stats/mxedges/{mxedge_id}, GET /api/v1/sites/{site_id}/mxedges/{mxedge_id}, GET /api/v1/sites/{site_id}/stats/mxedges/{mxedge_id}",
 		Columns:  mxedgeColumns,
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.status, "status", "", "filter by status: connected, disconnected")
@@ -120,21 +120,38 @@ func describeMxedge(ctx context.Context, a *app, name string) (*described, error
 	if err != nil {
 		return nil, err
 	}
-	item, err := pickOne(items, name, []string{"name", "id", "mac"}, "mxedge")
+	item, err := pickOne(preferSite(ctx, a, items, name), name, []string{"name", "id", "mac"}, "mxedge")
 	if err != nil {
 		return nil, err
 	}
-	id, ok := client.ParseUUID(output.Text(output.Decode(item)["id"]))
+	listed := output.Decode(item)
+	id, ok := client.ParseUUID(output.Text(listed["id"]))
 	if !ok {
 		return nil, fmt.Errorf("mxedge %q has no ID", name)
 	}
+	// The org list (for_site=any) returns org-level and site-assigned
+	// edges alike; the listed item tells which one this is.
+	// An org-level edge carries the nil UUID as site_id.
+	site, siteEdge := client.ParseUUID(output.Text(listed["site_id"]))
+	siteEdge = siteEdge && site != uuid.Nil
+	// The org endpoints answer 404 for an edge assigned to a site (seen on
+	// a live org): its configuration and stats are read from the site.
 	cfg, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.Mxedge], error) {
+		if siteEdge {
+			// the SDK returns the bare HTTP response for this call; the
+			// body is captured by the transport either way
+			_, err := cl.SDK.SitesMxEdges().GetSiteMxEdge(ctx, site, id)
+			return models.ApiResponse[models.Mxedge]{}, err
+		}
 		return cl.SDK.OrgsMxEdges().GetOrgMxEdge(ctx, org, id)
 	})
 	if err != nil {
 		return nil, err
 	}
 	stats, serr := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.StatsMxedge], error) {
+		if siteEdge {
+			return cl.SDK.SitesStatsMxEdges().GetSiteMxEdgeStats(ctx, site, id, nil, nil, nil)
+		}
 		return cl.SDK.OrgsStatsMxEdges().GetOrgMxEdgeStats(ctx, org, id, nil)
 	})
 	c, s := output.Decode(cfg.Body), map[string]any{}
@@ -155,8 +172,13 @@ func describeMxedge(ctx context.Context, a *app, name string) (*described, error
 		{"MAC", pick("mac")},
 		{"Serial", pick("serial")},
 	}
-	if site := pick("site_id"); site != "" {
-		header = append(header, [2]string{"Site", siteLabel(a.siteNames(ctx), site)})
+	scope := "org-level"
+	if siteEdge {
+		scope = "site-level"
+	}
+	header = append(header, [2]string{"Scope", scope})
+	if siteEdge {
+		header = append(header, [2]string{"Site", siteLabel(a.siteNames(ctx), site.String())})
 	}
 	header = append(header,
 		[2]string{"Status", output.Text(s["status"])},
@@ -166,7 +188,45 @@ func describeMxedge(ctx context.Context, a *app, name string) (*described, error
 		[2]string{"Tunnels", output.Text(s["num_tunnels"])},
 		[2]string{"Services", output.Text(c["services"])},
 	)
-	return (&described{Header: header, Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr))}).noteUnavailable(a, "stats", serr), nil
+	d := &described{Header: header, Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr))}
+	if isNotFound(serr) {
+		// The edge was just listed: missing stats are worth saying, they
+		// must not read as an edge without status.
+		fmt.Fprintf(a.err, "warning: stats of this %s Mist Edge were not found\n", scope)
+		d.Header = append(d.Header, [2]string{"Stats", "not found (" + scope + " Mist Edge)"})
+		d.Doc = appendField(d.Doc, "stats_error", serr.Error())
+		return d, nil
+	}
+	return d.noteUnavailable(a, "stats", serr), nil
+}
+
+// preferSite narrows items that match q on name to those of the selected
+// site (--site or the context's) when several share the name, as
+// lookupDevice does for devices. Other cases are left to pickOne.
+func preferSite(ctx context.Context, a *app, items []json.RawMessage, q string) []json.RawMessage {
+	var same []json.RawMessage
+	for _, it := range items {
+		if strings.EqualFold(output.Text(output.Decode(it)["name"]), q) {
+			same = append(same, it)
+		}
+	}
+	if len(same) < 2 {
+		return items
+	}
+	site, ok, err := a.siteID(ctx)
+	if err != nil || !ok {
+		return items
+	}
+	var in []json.RawMessage
+	for _, it := range same {
+		if strings.EqualFold(output.Text(output.Decode(it)["site_id"]), site.String()) {
+			in = append(in, it)
+		}
+	}
+	if len(in) == 0 {
+		return items
+	}
+	return in
 }
 
 // ---- routing peers --------------------------------------------------------
