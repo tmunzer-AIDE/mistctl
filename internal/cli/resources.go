@@ -178,6 +178,7 @@ func init() {
 		// monitoring
 		alarmsResource(), eventsResource(), slesResource(), rrmResource(), rrmEventsResource(),
 		alarmDefinitionsResource(), eventDefinitionsResource(), webhookDeliveriesResource(),
+		configHistoryResource(),
 		// stats
 		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(), tunnelsResource(),
 	}
@@ -189,15 +190,16 @@ func init() {
 // whose rows have no (unique) name.
 func applyNameKeys() {
 	keys := map[string][]string{
-		"clients":       {"mac"},
-		"wlans":         {"ssid", "id"},
-		"rrm":           {"band"},
-		"alarms":        {"id"},
-		"events":        {"type"},
-		"sles":          {"site_name|site_id"},
-		"rrm-events":    {"device_name|ap"},
-		"org-settings":  {"org_name|org_id"},
-		"site-settings": {"site_name|site_id"},
+		"clients":        {"mac"},
+		"wlans":          {"ssid", "id"},
+		"rrm":            {"band"},
+		"alarms":         {"id"},
+		"events":         {"type"},
+		"sles":           {"site_name|site_id"},
+		"rrm-events":     {"device_name|ap"},
+		"config-history": {"name|ap"},
+		"org-settings":   {"org_name|org_id"},
+		"site-settings":  {"site_name|site_id"},
 	}
 	joined := map[string][]string{
 		"ports":      {"device_name|mac", "port_id"},
