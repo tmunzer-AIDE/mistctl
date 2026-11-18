@@ -1,0 +1,1970 @@
+{
+ "acl-policy": {
+  "desc": "Time series for Firewall [acl, gbp] filter counters - tracking number of packets and bytes",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "dst_tag": {},
+   "policy_name": {},
+   "src_tag": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "activity": {
+  "desc": "Client Activity By Scope",
+  "intervals": {
+   "1d": [
+    86400,
+    1209600
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "family": {},
+   "metric": {
+    "choices": [
+     "bytes",
+     "tx_bytes",
+     "rx_bytes",
+     "num_clients"
+    ]
+   },
+   "model": {},
+   "os": {},
+   "ssid": {},
+   "wlan_id": {}
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "ap-availability": {
+  "desc": "Uptime of APs and sites (WIP)",
+  "intervals": {
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "ap-count": {
+  "desc": "AP Count By Scope",
+  "intervals": {
+   "1d": [
+    86400,
+    1209600
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "metric": {
+    "choices": [
+     "num_aps",
+     "num_aps_online",
+     "num_aps_offline"
+    ]
+   }
+  },
+  "scopes": [
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "ap-rf-metrics": {
+  "desc": "Detailed RF metrics over time per AP per band (SUB-VNA required)",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "avg_rx_bps": "Bps",
+   "avg_tx_bps": "Bps",
+   "avg_tx_failed": "",
+   "avg_tx_retried": "",
+   "avg_tx_retries": "",
+   "max_rx_bps": "Bps",
+   "max_tx_bps": "Bps",
+   "max_tx_failed": "",
+   "max_tx_retried": "",
+   "max_tx_retries": "",
+   "min_rx_bps": "Bps",
+   "min_tx_bps": "Bps",
+   "min_tx_failed": "",
+   "min_tx_retried": "",
+   "min_tx_retries": ""
+  },
+  "params": {
+   "band": {
+    "choices": [
+     "24",
+     "5",
+     "6"
+    ]
+   }
+  },
+  "scopes": [
+   "ap"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "app-bytes": {
+  "desc": "Rx, Tx and max sessions Time series data for application",
+  "intervals": {
+   "1h": [
+    3600,
+    1209600
+   ],
+   "5m": [
+    300,
+    86400
+   ]
+  },
+  "params": {
+   "app": {
+    "required": true
+   },
+   "node": {},
+   "peer_mac": {},
+   "peer_port_id": {},
+   "policy": {},
+   "port_id": {},
+   "tenant": {},
+   "via_vpn": {}
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "band24-util": {
+  "desc": "channel utilization on 2.4G",
+  "scopes": [
+   "ap"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "band5-util": {
+  "desc": "channel utilization on 5G",
+  "scopes": [
+   "ap"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "band6-util": {
+  "desc": "channel utilization on 6G",
+  "scopes": [
+   "ap"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "bgp-ribs-metrics": {
+  "desc": "Detailed BGP Ribs (resolved into vrf_name) metrics over time per device/switch per neighbor",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "accepted_prefixes": "",
+   "active_prefixes": "",
+   "advertised_prefixes": "",
+   "received_prefixes": "",
+   "suppressed_prefixes": ""
+  },
+  "scopes": [
+   "device",
+   "switch"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "bps": {
+  "desc": "bytes per second over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "timeseries",
+  "unit": "byte"
+ },
+ "bytes": {
+  "desc": "aggregated bytes over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "client",
+   "site"
+  ],
+  "type": "timeseries",
+  "unit": "byte"
+ },
+ "call-metrics": {
+  "desc": "Time series of Calls related data",
+  "intervals": {
+   "1h": [
+    3600,
+    1209600
+   ],
+   "5m": [
+    300,
+    86400
+   ]
+  },
+  "scopes": [
+   "site"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "call-user_cpu": {
+  "desc": "Time series of the top N highest CPU utilization values observed per time interval, sourced from third party video conferencing apps",
+  "intervals": {
+   "1h": [
+    3600,
+    1209600
+   ],
+   "5m": [
+    300,
+    43200
+   ]
+  },
+  "scopes": [
+   "client",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "call-user_feedback": {
+  "desc": "Time series of user feedback sourced from third party video conferencing apps",
+  "intervals": {
+   "1h": [
+    3600,
+    1209600
+   ],
+   "5m": [
+    300,
+    43200
+   ]
+  },
+  "scopes": [
+   "client",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "call-user_qos": {
+  "desc": "Time series of QoS data sourced from third party video conferencing apps",
+  "intervals": {
+   "1h": [
+    3600,
+    1209600
+   ],
+   "5m": [
+    300,
+    43200
+   ]
+  },
+  "scopes": [
+   "client",
+   "site"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "channel-util": {
+  "desc": "channel utilization",
+  "keys": {
+   "channel": "",
+   "util_all": "float",
+   "util_non_wifi": "float",
+   "util_rx_in_bss": "float",
+   "util_rx_other_bss": "float",
+   "util_tx": "float",
+   "util_undecodable_wifi": "float",
+   "util_unknown_wifi": "float"
+  },
+  "params": {
+   "band": {
+    "choices": [
+     "24",
+     "5",
+     "6"
+    ],
+    "required": true
+   }
+  },
+  "scopes": [
+   "ap"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "client-auth-latency": {
+  "desc": "average client assoc latency",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "client",
+   "site"
+  ],
+  "type": "timeseries",
+  "unit": "millisecond"
+ },
+ "client-capacity-band24": {
+  "desc": "Capacity data of APs/Sites on band 24",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "client-capacity-band5": {
+  "desc": "Capacity data of APs/Sites on band 5",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "client-coverage-band24": {
+  "desc": "Coverage data of APs/Sites on band 24",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "client-coverage-band5": {
+  "desc": "Coverage data of APs/Sites on band 5",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "client-dhcp-latency": {
+  "desc": "average DHCP latency",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "client",
+   "site"
+  ],
+  "type": "timeseries",
+  "unit": "millisecond"
+ },
+ "client-rf-metrics": {
+  "desc": "Detailed RF metrics over time (SUB-VNA required)",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "avg_rssi": "dBm",
+   "avg_rx_bps": "Bps",
+   "avg_rx_rates": "bps",
+   "avg_rx_retries": "",
+   "avg_snr": "dB",
+   "avg_tx_bps": "Bps",
+   "avg_tx_failed": "",
+   "avg_tx_rates": "bps",
+   "avg_tx_retried": "",
+   "avg_tx_retries": "",
+   "max_rssi": "dBm",
+   "max_rx_bps": "Bps",
+   "max_rx_rates": "bps",
+   "max_rx_retries": "",
+   "max_snr": "dB",
+   "max_tx_bps": "Bps",
+   "max_tx_failed": "",
+   "max_tx_rates": "bps",
+   "max_tx_retried": "",
+   "max_tx_retries": "",
+   "min_rssi": "dBm",
+   "min_rx_bps": "Bps",
+   "min_rx_rates": "bps",
+   "min_rx_retries": "",
+   "min_snr": "dB",
+   "min_tx_bps": "Bps",
+   "min_tx_failed": "",
+   "min_tx_rates": "bps",
+   "min_tx_retried": "",
+   "min_tx_retries": ""
+  },
+  "scopes": [
+   "client"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "client-roam-band24": {
+  "desc": "success / failures of client roam",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "client-roam-band5": {
+  "desc": "success / failures of client roam",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "cpu": {
+  "desc": "CPU utilization",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "device",
+   "mxedge",
+   "switch"
+  ],
+  "type": "keyed-timeseries",
+  "unit": "percent"
+ },
+ "dns-latency": {
+  "desc": "average DNS latency",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "site"
+  ],
+  "type": "timeseries",
+  "unit": "millisecond"
+ },
+ "edge-uptime-bar": {
+  "scopes": [
+   "mxedge"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "gateway-metrics": {
+  "desc": "Gateway Statistics",
+  "intervals": {
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "metric": {
+    "choices": [
+     "rx_bytes",
+     "tx_bytes",
+     "bytes"
+    ]
+   }
+  },
+  "scopes": [
+   "device",
+   "gateway",
+   "site"
+  ],
+  "type": "timeseries"
+ },
+ "lte_rssi": {
+  "desc": "wan lte rssi over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "avg_rsrp": "",
+   "avg_rsrq": "",
+   "avg_rssi": "",
+   "avg_snr": "",
+   "carrier": ""
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "memory": {
+  "desc": "memory utilization",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "device",
+   "mxedge",
+   "switch"
+  ],
+  "type": "keyed-timeseries",
+  "unit": "percent"
+ },
+ "minis-app-metrics": {
+  "desc": "Minis application metrics over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "ping_latency": "millisecond",
+   "ping_packet_loss": "percent"
+  },
+  "scopes": [
+   "site"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "minis-probe-stats": {
+  "desc": "Time Series of network stats from minis probes",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "latency": "ms",
+   "latency_threshold": "ms",
+   "network_latency": "ms",
+   "network_loss": "percent"
+  },
+  "params": {
+   "probe": {},
+   "vlan": {}
+  },
+  "scopes": [
+   "site"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "minis-top-probes": {
+  "desc": "Get top minis probes tested and all vlans associated with the probe",
+  "params": {
+   "probe": {}
+  },
+  "scopes": [
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "mxedge-metrics": {
+  "desc": "MXEdge system metrics over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "avg_cpu": "percent",
+   "avg_exhaust_temp": "celsius",
+   "avg_inlet_temp": "celsius",
+   "avg_memory": "percent",
+   "max_cpu": "percent",
+   "max_exhaust_temp": "celsius",
+   "max_inlet_temp": "celsius",
+   "max_memory": "percent"
+  },
+  "scopes": [
+   "mxedge"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "network-table-metrics": {
+  "desc": "Detailed network table metrics capacity ARP, mac, route over time per device/switch",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "avg_arp_table_count": "float",
+   "avg_mac_table_count": "float",
+   "avg_total_routes": "float",
+   "max_arp_table_count": "int",
+   "max_mac_table_count": "int",
+   "max_total_routes": "int",
+   "min_arp_table_count": "int",
+   "min_mac_table_count": "int",
+   "min_total_routes": "int"
+  },
+  "scopes": [
+   "device",
+   "switch"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "network_connection": {
+  "desc": "Network connection info about the client, over time (as reported by marvis SDK clients)",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ]
+  },
+  "keys": {
+   "avg_rssi": "",
+   "type": ""
+  },
+  "scopes": [
+   "client"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "noise": {
+  "desc": "noise floor over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "avg_noise": "db",
+   "max_noise": "db",
+   "min_noise": "db"
+  },
+  "params": {
+   "band": {
+    "choices": [
+     "24",
+     "5",
+     "6"
+    ],
+    "required": true
+   }
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "num_aps": {
+  "desc": "number of active aps over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "site"
+  ],
+  "type": "timeseries"
+ },
+ "num_clients": {
+  "desc": "number of client over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "device",
+   "site"
+  ],
+  "type": "timeseries"
+ },
+ "num_ips": {
+  "desc": "number of WAN clients by src-ip",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "timeseries"
+ },
+ "num_mxtunnels": {
+  "desc": "number of active mxtunnels over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "mxedge"
+  ],
+  "type": "timeseries"
+ },
+ "num_sessions": {
+  "desc": "SPU active sessions",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "optic-metrics": {
+  "desc": "Detailed optic metrics over time per device/switch per optic port",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "avg_bias_current": "mA",
+   "avg_rx_power": "dBm",
+   "avg_temperature": "celsius",
+   "avg_tx_power": "dBm",
+   "avg_voltage": "V",
+   "max_bias_current": "mA",
+   "max_rx_power": "dBm",
+   "max_temperature": "celsius",
+   "max_tx_power": "dBm",
+   "max_voltage": "V",
+   "min_bias_current": "mA",
+   "min_rx_power": "dBm",
+   "min_temperature": "celsius",
+   "min_tx_power": "dBm",
+   "min_voltage": "V"
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device",
+   "switch"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "port-metrics": {
+  "desc": "Per-port metrics over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "rx_bytes": "byte",
+   "rx_errors": "",
+   "tx_bytes": "byte",
+   "tx_errors": ""
+  },
+  "params": {
+   "port_id": {
+    "required": true
+   }
+  },
+  "scopes": [
+   "device",
+   "mxedge",
+   "switch"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "port_rx_errors": {
+  "desc": "number of RX errors for ethernet ports over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "ap",
+   "device",
+   "site",
+   "switch"
+  ],
+  "type": "timeseries"
+ },
+ "port_tx_errors": {
+  "desc": "number of TX errors for ethernet ports over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device",
+   "switch"
+  ],
+  "type": "timeseries"
+ },
+ "power_draw": {
+  "desc": "power draw",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "device",
+   "switch"
+  ],
+  "type": "keyed-timeseries",
+  "unit": "watt"
+ },
+ "rssi": {
+  "desc": "rssi over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "avg_rssi": "",
+   "max_rssi": "",
+   "min_rssi": ""
+  },
+  "scopes": [
+   "ap",
+   "client",
+   "site"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "rx_bcast": {
+  "desc": "number of rx broadcast pkts",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "timeseries",
+  "unit": "packet"
+ },
+ "rx_bps": {
+  "desc": "rx bytes per second over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "timeseries",
+  "unit": "Bps"
+ },
+ "rx_bytes": {
+  "desc": "aggregated RX (Client-> AP) bytes over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "ap",
+   "client",
+   "device",
+   "mxedge",
+   "site",
+   "switch"
+  ],
+  "type": "timeseries",
+  "unit": "byte"
+ },
+ "rx_mcast": {
+  "desc": "number of rx multicast pkts",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "timeseries",
+  "unit": "packet"
+ },
+ "rx_pkts": {
+  "desc": "number of rx unicast pkts",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "timeseries",
+  "unit": "packet"
+ },
+ "rx_rates": {
+  "desc": "average RX (Client->AP) rate over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "timeseries",
+  "unit": "bps"
+ },
+ "rx_retries": {
+  "desc": "number of RX retries over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "timeseries"
+ },
+ "sensor": {
+  "desc": "sensor data over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "avg_ambient_temp": "celsius",
+   "avg_attitude": "meter",
+   "avg_cpu_temp": "celsius",
+   "avg_humidity": "percent",
+   "avg_pressure": "kPa",
+   "max_ambient_temp": "celsius",
+   "max_attitude": "meter",
+   "max_cpu_temp": "celsius",
+   "max_humidity": "percent",
+   "max_pressure": "kPa",
+   "med_ambient_temp": "celsius",
+   "med_attitude": "meter",
+   "med_cpu_temp": "celsius",
+   "med_humidity": "percent",
+   "med_pressure": "kPa",
+   "min_ambient_temp": "celsius",
+   "min_attitude": "meter",
+   "min_cpu_temp": "celsius",
+   "min_humidity": "percent",
+   "min_pressure": "kPa"
+  },
+  "scopes": [
+   "ap"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "site-summary": {
+  "desc": "site summary in time-series",
+  "intervals": {
+   "1d": [
+    86400,
+    2592000
+   ]
+  },
+  "scopes": [
+   "site"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "spu": {
+  "desc": "SPU utilization",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyed-timeseries",
+  "unit": "percent"
+ },
+ "spu_memory": {
+  "desc": "SPU memory utilization",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyed-timeseries",
+  "unit": "percent"
+ },
+ "successful-connect": {
+  "desc": "track clients connection attempts to wireless, which includes auth / association / first dhcp",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "switch-metrics": {
+  "desc": "Switch Statistics",
+  "intervals": {
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "metric": {
+    "choices": [
+     "total_switch_count",
+     "total_ap_count",
+     "total_port_count",
+     "num_used_ports",
+     "total_poe_port_count",
+     "num_used_poe_ports",
+     "rx_bytes",
+     "tx_bytes",
+     "bytes"
+    ]
+   }
+  },
+  "scopes": [
+   "device",
+   "site",
+   "switch"
+  ],
+  "type": "timeseries"
+ },
+ "time-to-connect": {
+  "desc": "track the time for a client to connect to wireless, which includes auth / association / first dhcp",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-ap-by-bytes": {
+  "desc": "top N ap by bytes",
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-ap-by-num_client": {
+  "desc": "top AP by number of clients",
+  "scopes": [
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-app-by-bytes": {
+  "params": {
+   "app_src": {},
+   "category": {},
+   "configured": {},
+   "custom_app": {},
+   "port_id": {},
+   "service": {},
+   "src_ip": {},
+   "wired": {},
+   "wlan_id": {}
+  },
+  "scopes": [
+   "ap",
+   "client",
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-app-by-num_client": {
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-categories-by-bytes": {
+  "desc": "Top N categories by bytes",
+  "params": {
+   "configured": {},
+   "port_id": {},
+   "wired": {}
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-client": {
+  "desc": "top clients",
+  "params": {
+   "app": {},
+   "custom_app": {},
+   "port_id": {},
+   "wired": {}
+  },
+  "scopes": [
+   "ap",
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-client-by-num_ssids": {
+  "scopes": [
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-client-by-threats": {
+  "scopes": [
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-client_or_ip-by-bytes": {
+  "desc": "top clients or ip by total bytes",
+  "params": {
+   "app": {},
+   "category": {},
+   "configured": {},
+   "custom_app": {},
+   "peer_mac": {},
+   "peer_port_id": {},
+   "port_id": {},
+   "service": {},
+   "wired": {}
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-flow-by-app": {
+  "desc": "Top applications by traffic volume for a switch device or an entire site, aggregated over the requested time range. At site scope, flows reported by multiple switches are deduplicated before aggregation. `sampling_percentage` indicates the percentage of packets sampled (e.g. 0.1 means 0.1% of packets are captured via sFlow; 100.0 means all packets are captured via FBT).",
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-flow-by-dst": {
+  "desc": "Top destination IPs by traffic volume for a switch device or an entire site, aggregated over the requested time range. At site scope, flows reported by multiple switches are deduplicated before aggregation. `sampling_percentage` indicates the percentage of packets sampled (e.g. 0.1 means 0.1% of packets are captured via sFlow; 100.0 means all packets are captured via FBT).",
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-flow-by-src": {
+  "desc": "Top source IPs by traffic volume for a switch device or an entire site, aggregated over the requested time range. At site scope, flows reported by multiple switches are deduplicated before aggregation. `sampling_percentage` indicates the percentage of packets sampled (e.g. 0.1 means 0.1% of packets are captured via sFlow; 100.0 means all packets are captured via FBT).",
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-gateway-by-bytes": {
+  "desc": "top gateway by bytes",
+  "scopes": [
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-grouped-apps": {
+  "params": {
+   "app_src": {},
+   "category": {},
+   "configured": {},
+   "custom_app": {},
+   "grouped_by": {},
+   "port_id": {},
+   "service": {},
+   "src_ip": {},
+   "wired": {},
+   "wlan_id": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyvalues"
+ },
+ "top-ip": {
+  "desc": "top WAN clients by src-ip",
+  "params": {
+   "app": {},
+   "port_id": {},
+   "wired": {
+    "required": true
+   }
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-port-by-bytes": {
+  "desc": "top N ports by bytes",
+  "params": {
+   "configured": {},
+   "device_type": {
+    "choices": [
+     "switch",
+     "gateway"
+    ]
+   },
+   "wired": {}
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-services-by-bytes": {
+  "desc": "Top N services by bytes",
+  "params": {
+   "configured": {},
+   "port_id": {},
+   "wired": {}
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-switch-by-bytes": {
+  "desc": "top switch by bytes",
+  "scopes": [
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-wan-apps": {
+  "desc": "Rx, Tx and max sessions Time series data for top applications",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "path_type": {
+    "required": true
+   },
+   "peer_mac": {},
+   "peer_port_id": {},
+   "policy": {
+    "required": true
+   },
+   "port_id": {
+    "required": true
+   },
+   "tenant": {}
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "top-wan-policy-by-bytes": {
+  "desc": "Top Policy and Tenants by bytes",
+  "params": {
+   "path_type": {},
+   "peer_mac": {},
+   "peer_port_id": {},
+   "port_id": {}
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-wlan-by-bytes": {
+  "desc": "top N wlan by bytes",
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "top-wlan-by-num_client": {
+  "desc": "top N wlan by number of clients",
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "keyvalues"
+ },
+ "tunterm-metrics": {
+  "desc": "mxedge tunnel termination metrics over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "drop_ip4_must_fragment": "",
+   "drop_ipsec_no_sa": "",
+   "drop_ipsec_unknown_spi": "",
+   "drop_l2tp_no_session": "",
+   "drop_protected_svi": "",
+   "drop_vlan_not_on_port": ""
+  },
+  "scopes": [
+   "mxedge"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "tunterm-port-metrics": {
+  "desc": "mxedge tunnel termination per-port metrics over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "rx_bytes": "byte",
+   "rx_errors": "",
+   "rx_lacpdu": "",
+   "rx_pkts": "packet",
+   "tx_bytes": "byte",
+   "tx_errors": "",
+   "tx_lacpdu": "",
+   "tx_pkts": "packet"
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "mxedge"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "tx_bcast": {
+  "desc": "number of tx broadcast pkts",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "timeseries",
+  "unit": "packet"
+ },
+ "tx_bps": {
+  "desc": "tx bytes per second over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device",
+   "site"
+  ],
+  "type": "timeseries",
+  "unit": "Bps"
+ },
+ "tx_bytes": {
+  "desc": "aggregated TX (AP->Client) bytes over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "ap",
+   "client",
+   "device",
+   "mxedge",
+   "site",
+   "switch"
+  ],
+  "type": "timeseries",
+  "unit": "byte"
+ },
+ "tx_mcast": {
+  "desc": "number of tx multicast pkts",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "timeseries",
+  "unit": "packet"
+ },
+ "tx_pkts": {
+  "desc": "number of tx unicast pkts",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "timeseries",
+  "unit": "packet"
+ },
+ "tx_rates": {
+  "desc": "average TX (AP->Client) rate over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "timeseries",
+  "unit": "bps"
+ },
+ "tx_retries": {
+  "desc": "number of TX retries over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "ap",
+   "site"
+  ],
+  "type": "timeseries"
+ },
+ "tx_rx_bps": {
+  "desc": "tx bytes per second and rx bytes per second aggregated over time",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "keys": {
+   "max_rx_bps": "Bps",
+   "max_tx_bps": "Bps"
+  },
+  "params": {
+   "port_id": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "uptime-bar": {
+  "params": {
+   "device_type": {
+    "choices": [
+     "ap",
+     "switch",
+     "gateway"
+    ]
+   }
+  },
+  "scopes": [
+   "ap",
+   "device",
+   "site"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "vpn_peer": {
+  "desc": "Get the peer mappings from a device over a time range",
+  "params": {
+   "local_breakout": {},
+   "mac": {
+    "required": true
+   }
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyvalues"
+ },
+ "vpn_peer-metrics": {
+  "desc": "Time series stats for a particular peer path",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "params": {
+   "local_breakout": {},
+   "node": {},
+   "peer_mac": {},
+   "peer_port_id": {},
+   "policy": {},
+   "port_id": {}
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "wan_link_health": {
+  "desc": "Time series stats for a wan edge",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyed-timeseries"
+ },
+ "wan_policy_hit_count": {
+  "desc": "Time series for WAN Policy hit count",
+  "intervals": {
+   "10m": [
+    600,
+    86400
+   ],
+   "1h": [
+    3600,
+    1209600
+   ]
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyed-timeseries-list"
+ },
+ "worst-vpn_peers": {
+  "desc": "Worst n peer path data, default value for n is 3",
+  "params": {
+   "metric": {
+    "choices": [
+     "jitter",
+     "loss",
+     "latency",
+     "mos"
+    ],
+    "required": true
+   }
+  },
+  "scopes": [
+   "device"
+  ],
+  "type": "keyvalues"
+ }
+}

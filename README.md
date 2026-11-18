@@ -90,6 +90,7 @@ mistctl get rrm --site HQ --band 5
 | --- | --- |
 | `get RESOURCE [NAME...]` | List resources as a table, or `-o wide/json/yaml/name` |
 | `describe RESOURCE NAME` | Summary plus full config and status of one object |
+| `insights KIND [NAME] [METRIC...]` | Metrics over time (and top N lists) of a site, client, AP, switch, gateway or Mist Edge |
 | `attach DEVICE` | Interactive remote shell on a switch or gateway |
 | `whoami` | Identity, cloud and privileges of the current token |
 | `usage` (alias `ratelimit`) | API calls used / remaining in the current hourly window |
@@ -136,6 +137,53 @@ mistctl get rrm --site HQ --band 5
 
 Objects can be referred to by name, ID, or (devices and clients) MAC address in
 any format (`5c5b35000001`, `5C:5B:35:00:00:01`, `5c-5b-...`).
+
+### Insight metrics
+
+`mistctl insights` reads the Mist insight metrics: values over time (clients,
+traffic, RSSI, CPU, ...) and top N lists (applications, clients, ports, ...).
+Name the object and mistctl builds the request: it finds the object and its
+site by name, shows a few useful metrics when none is given, and picks the
+aggregation interval from the time window.
+
+```sh
+mistctl insights site --site HQ                       # num_clients, num_aps, bytes, rssi over the last day
+mistctl insights client laptop-42                     # by hostname or MAC; the site is looked up
+mistctl insights client laptop-42 rssi --duration 6h --points
+mistctl insights ap ap-lobby-01 num_clients --duration 7d
+mistctl insights switch sw-core cpu memory
+mistctl insights switch sw-core rx_bytes tx_bytes --port ge-0/0/1
+mistctl insights gateway gw-hq rx_bps tx_bps
+mistctl insights site top-app-by-bytes --limit 5
+mistctl insights metrics client                       # the metric names of one kind of object
+```
+
+```
+$ mistctl insights switch sw-core cpu rx_bytes
+Switch sw-core (5c5b35000002), site HQ, 2026-11-17 07:00 to 2026-11-18 07:00
+
+METRIC     SERIES    INTERVAL   MIN       AVG        MAX        LAST      TREND
+cpu        avg_cpu   1h         4.67%     4.84%      4.95%      4.67%     ▅▅▆▇█▆▅▃▂▁▁▂▃▅▆▇▇▆▅▄▃▂▂▁
+cpu        max_cpu   1h         6%        6.67%      7%         6%        ▃▃▅▇█▇▅▃▁▁▁▁▃▅▇▇█▇▅▃▃▁▁▁
+rx_bytes   -         1h         25.4 MB   217.8 MB   490.4 MB   25.4 MB   █▆▅▄▃▂▂▁▁▁▂▃▄▅▅▄▃▂▂▁▁▁▁▁
+```
+
+| Flag | Description |
+| --- | --- |
+| `--duration`, `--start`, `--end` | Time window (default: the last day), as for the other historical commands |
+| `--interval` | Aggregation interval (`10m`, `1h`, `1d`). Default: the finest one Mist still keeps for the window that gives at most 60 points, so `10m` up to 10 hours and `1h` beyond for most metrics |
+| `--points` | Print every value over time instead of one summary line per series |
+| `--no-trend` | Drop the `TREND` column |
+| `--limit` | Rows of a top N metric (default 10) |
+| `--port` | Limit a device metric to one port |
+| `--param key=value` | Any other parameter of a metric (`band=5`, `wlan_id=...`); `insights metrics` lists them |
+| `--force` | Send a metric name that is not in mistctl's built-in list |
+
+METRIC names complete with `<TAB>` for the kind of object, and so do device
+names and client hostnames. `-o json` and `-o yaml` print the API answers, keyed
+by metric name. One API request is sent per metric. The metric list is built
+into mistctl (`scripts/insight-metrics.py` refreshes it);
+`mistctl insights metrics --live` shows what the API offers today.
 
 ### Global flags
 
