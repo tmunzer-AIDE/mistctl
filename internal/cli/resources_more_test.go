@@ -262,7 +262,7 @@ func TestAlarms(t *testing.T) {
 
 func TestEvents(t *testing.T) {
 	fake := setupMore(t)
-	out := run(t, "get", "events", "--device", "ap-lobby")
+	out := run(t, "get", "events", "--source", "device", "--device", "ap-lobby")
 	assertContains(t, out, "AP_DISCONNECTED", "ap-lobby", "lost heartbeat", "HQ")
 	c := fake.called("/api/v1/orgs/" + orgID + "/devices/events/search")
 	if len(c) != 1 || !strings.Contains(c[0], "mac=5c5b35000001") || !strings.Contains(c[0], "limit=1000") {
@@ -374,7 +374,7 @@ func TestAPIResourcesListsNewResources(t *testing.T) {
 func TestNewResourcesAreGetOnly(t *testing.T) {
 	fake := setupMore(t)
 	for _, args := range [][]string{
-		{"get", "wlans"}, {"get", "alarms"}, {"get", "events"}, {"get", "sles"}, {"get", "ports", "--site", "HQ"},
+		{"get", "wlans"}, {"get", "alarms"}, {"get", "events", "--source", "device"}, {"get", "sles"}, {"get", "ports", "--site", "HQ"},
 		{"describe", "wlantemplate", "Campus"}, {"describe", "mxedge", "edge-01"},
 	} {
 		run(t, args...)

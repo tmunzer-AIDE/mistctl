@@ -291,14 +291,12 @@ only that site.`,
 		group: "monitoring", title: "event",
 		short: "Device, client, system, NAC or WAN client events during a time window",
 		about: `Searches events during --duration (default 1d), or between --start and
---end, newest first. --source picks the kind of events: device (default),
+--end, newest first. --source picks the kind of events: device,
 client (wireless client events), system (configuration and audit-style
 events), nac (Mist NAC authentications) or wan (clients of WAN edges).
-Without --source, the filters decide: --username searches NAC events;
---client, --ssid, --band or --reason search wireless client events; anything
-else, --device included, searches device events. Pass --source for the other
-cases, such as the client events of one AP (--source client --device AP) or
-the NAC events of one client.
+--source is required: --device and --client do not mean the same thing for
+every source (for client and NAC events --device is the AP), so mistctl
+does not guess.
 --limit caps the number of events shown (default 1000, the newest ones);
 pass --limit 0 for all of them.
 
@@ -308,9 +306,9 @@ system events: those are applied locally, and mistctl reads further pages
 until --limit matching events are found.
 ` + "`mistctl get event-definitions --source SOURCE`" + ` lists the event types.`,
 		examples: []string{
-			"get events --site HQ",
-			"get events -A --device sw-core --type SW_PORT_DOWN --duration 7d",
-			"get events --site HQ --client aa:bb:cc:dd:ee:ff --band 5",
+			"get events --source device --site HQ",
+			"get events --source device -A --device sw-core --type SW_PORT_DOWN --duration 7d",
+			"get events --source client --site HQ --client aa:bb:cc:dd:ee:ff --band 5",
 			"get events --source client --site HQ --device ap-lobby-01",
 			"get events --source client -A --type CLIENT_DEAUTHENTICATED --reason 15",
 			"get events --source nac --client aa:bb:cc:dd:ee:ff --type NAC_CLIENT_DENY",

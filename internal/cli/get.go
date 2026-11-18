@@ -34,7 +34,7 @@ NAME filters the list (name, ID or MAC address, depending on the resource).`,
   mistctl get device ap-lobby-01
   mistctl get wlans --site HQ
   mistctl get alarms --group infra --severity critical --duration 7d
-  mistctl get events --device sw-core --type SW_PORT_DOWN
+  mistctl get events --source device --device sw-core --type SW_PORT_DOWN
   mistctl get ports --device sw-core --status down
   mistctl get inventory --state unassigned
   mistctl get nac-clients --status denied --duration 7d`,
@@ -142,13 +142,8 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 			_ = cmd.RegisterFlagCompletionFunc("type", a.completeDefinitions(func(*cobra.Command) string { return "alarms" }))
 		case "events":
 			_ = cmd.RegisterFlagCompletionFunc("type", a.completeDefinitions(func(c *cobra.Command) string {
-				// same rule as eventSource: the filters pick the
-				// source when --source is not given
-				get := func(n string) string { v, _ := c.Flags().GetString(n); return v }
-				return eventSource(&listOpts{
-					source: get("source"), username: get("username"), clientMAC: get("client"),
-					ssid: get("ssid"), band: get("band"), reason: get("reason"),
-				})
+				src, _ := c.Flags().GetString("source")
+				return src
 			}))
 		default:
 			_ = cmd.RegisterFlagCompletionFunc("type", cobra.NoFileCompletions)
