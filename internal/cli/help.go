@@ -49,8 +49,8 @@ var resourceHelps = map[string]resourceHelp{
 		group: "inventory", title: "site",
 		about:            "--sitegroup and --template keep the sites of a site group, or the sites using an RF, AP, switch, WAN edge or alarm template (by name or ID).",
 		examples:         []string{"get sites", "get sites -o wide", "get site HQ -o yaml", "get sites --sitegroup EMEA", "get sites --template Campus-Switches"},
-		describe:         "Prints the site object (GET /sites/{site_id}) and its counters (connected APs, switches and gateways, clients). This is the site itself; see `describe site-settings` (and --derived) for its settings.",
-		describeExamples: []string{"describe site HQ"},
+		describe:         "Health summary of a site: the site object (GET /sites/{site_id}) and its counters (connected APs, switches and gateways, clients), the devices that are not connected (GET /sites/{site_id}/stats/devices), the unacknowledged alarms of the window, newest first (GET /sites/{site_id}/alarms/search, first 20) and the SLE scores of the window (GET /orgs/{org_id}/insights/sites-sle, one call per family the site has devices for: Wi-Fi, wired, WAN; the endpoint is org-wide, so 1 call per 1000 sites of the org). --duration (default 1d) or --start/--end set the window of the alarms and of the SLE scores. 4 to 7 API calls; a section that cannot be read is reported and does not fail the command. Next steps: `describe alarm ID`, `describe sle METRIC --site X`, `describe device NAME`. This is the site itself; see `describe site-settings` (and --derived) for its settings.",
+		describeExamples: []string{"describe site HQ", "describe site HQ --duration 7d", "describe site HQ -o json"},
 	},
 	"devices": {
 		group: "inventory", title: "device",
