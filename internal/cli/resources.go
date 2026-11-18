@@ -371,52 +371,9 @@ func sitesResource() *resource {
 			}
 			return filterSites(ctx, a, items, o)
 		},
-		Describe: func(ctx context.Context, a *app, name string) (*described, error) {
-			e, err := a.lookup(ctx, kindSites, name)
-			if err != nil {
-				return nil, err
-			}
-			cl, err := a.client()
-			if err != nil {
-				return nil, err
-			}
-			id := uuid.MustParse(e.ID)
-			site, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.Site], error) {
-				return cl.SDK.Sites().GetSiteInfo(ctx, id)
-			})
-			if err != nil {
-				return nil, err
-			}
-			stats, serr := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.StatsSite], error) {
-				return cl.SDK.SitesStats().GetSiteStats(ctx, id)
-			})
-			si, s := output.Decode(site.Body), map[string]any{}
-			if serr == nil {
-				s = output.Decode(stats.Body)
-			}
-			ratio := func(conn, total string) string {
-				c, t := output.Text(s[conn]), output.Text(s[total])
-				if t == "" {
-					return ""
-				}
-				return fmt.Sprintf("%s/%s connected", orDash(c), t)
-			}
-			return (&described{
-				Header: [][2]string{
-					{"Name", output.Text(si["name"])},
-					{"ID", e.ID},
-					{"Address", output.Text(si["address"])},
-					{"Country", output.Text(si["country_code"])},
-					{"Timezone", output.Text(si["timezone"])},
-					{"APs", ratio("num_ap_connected", "num_ap")},
-					{"Switches", ratio("num_switch_connected", "num_switch")},
-					{"Gateways", ratio("num_gateway_connected", "num_gateway")},
-					{"Clients", output.Text(s["num_clients"])},
-					{"Created", ageOf(si["created_time"])},
-				},
-				Doc: combine("site", site.Body, "stats", bodyOrNil(stats, serr)),
-			}).noteUnavailable(a, "stats", serr), nil
-		},
+		Describe:       describeSite,
+		DescribeFlags:  siteDescribeFlags,
+		DescribeOutput: "a summary and its tables, followed by the site object in YAML. -o json and -o yaml print one document: site, stats, disconnected_devices, alarms and sles (one entry per SLE family).",
 	}
 }
 
