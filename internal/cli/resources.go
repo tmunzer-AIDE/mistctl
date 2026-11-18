@@ -35,6 +35,7 @@ type listOpts struct {
 	mac        string // inventory, clients, nac/wan clients
 	state      string // inventory: assigned, unassigned
 	derived    bool   // site-settings
+	admin      string // audit-logs
 	template   string // sites
 	// historical searches
 	start, end string
@@ -178,6 +179,7 @@ func init() {
 		// monitoring
 		alarmsResource(), eventsResource(), slesResource(), rrmResource(), rrmEventsResource(),
 		alarmDefinitionsResource(), eventDefinitionsResource(), webhookDeliveriesResource(),
+		auditLogsResource(),
 		// stats
 		mxedgesResource(), bgpPeersResource(), ospfPeersResource(), portsResource(), zonesResource(), tunnelsResource(),
 	}
@@ -193,6 +195,7 @@ func applyNameKeys() {
 		"wlans":         {"ssid", "id"},
 		"rrm":           {"band"},
 		"alarms":        {"id"},
+		"audit-logs":    {"id"},
 		"events":        {"type"},
 		"sles":          {"site_name|site_id"},
 		"rrm-events":    {"device_name|ap"},

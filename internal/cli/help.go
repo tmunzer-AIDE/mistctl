@@ -350,6 +350,24 @@ error of each attempt.`,
 			"get webhook-deliveries --webhook splunk-alarms --topic alarms -o yaml",
 		},
 	},
+	"audit-logs": {
+		group: "monitoring", title: "audit log entry",
+		short: "Administrator actions (configuration changes, logins) during a time window",
+		about: `Searches the org audit log during --duration (default 1d), or between
+--start and --end, newest first: who changed what, and when. With --site,
+only the entries of that site (org-level changes have no site); without a
+site, or with -A, the whole org. --admin and --text are applied by the
+API: --admin matches the administrator name, --text the message.
+-o yaml shows the configuration before and after each change, when Mist
+recorded it. --limit caps the number of entries shown (default 1000, the
+newest ones); pass --limit 0 for all of them.`,
+		examples: []string{
+			"get audit-logs --site HQ --duration 2h",
+			"get audit-logs -A --admin \"Jane Doe\" --duration 7d",
+			"get audit-logs -A --text \"Update WLAN\" -o wide",
+			"get audit-logs --site HQ --start 2026-11-16T08:00 --end 2026-11-16T12:00 -o yaml",
+		},
+	},
 	"tunnels": {
 		group: "stats", title: "tunnel",
 		short: "WAN edge tunnels, or AP-to-Mist Edge tunnels (--type wxtunnel), with their state",

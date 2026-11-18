@@ -124,6 +124,7 @@ mistctl get rrm --site HQ --band 5
 | `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration` or `--start`/`--end`, `--sort`, `--group`, `--severity`, `--type`, `--acked`, `--ack-admin`, `--status` |
 | `events` | `ev` | org or site | device, client, system, NAC or WAN client event searches (`--source`), with `--duration` or `--start`/`--end`, `--sort`, `--type`, `--device`, `--client`, `--text`, `--ssid`, `--band`, `--reason`, `--username` |
 | `alarm-definitions`, `event-definitions` | `alarmdefs`, `eventdefs` | token | `/const/alarm_defs`, `/const/{device,client,system,nac,mxedge}_events`; they also feed `--type` completion of alarms and events |
+| `audit-logs` | `audit`, `logs` | org or site | `/orgs/{id}/logs/search` with `--duration` or `--start`/`--end`, `--sort`, `--admin`, `--text`; with a site, `site_id` is sent |
 | `webhook-deliveries` | `deliveries` | org | `/orgs/{id}/webhooks/{id}/events/search` with `--webhook`, `--status`, `--topic` |
 | `sles` | | org or site | `/orgs/{id}/insights/sites-sle` (`--sle wifi\|wired\|wan`), one row per site |
 | `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current` (one row per band: APs per channel/power, noise, neighbors; `-o wide` adds the RF template limits, `-o json` keeps any per-AP plan under `aps`), `/sites/{id}/rrm/events` |
