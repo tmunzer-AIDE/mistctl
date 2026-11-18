@@ -525,8 +525,10 @@ func devicesResource() *resource {
 			}
 			return append(items, edges...), nil
 		},
-		Enrich:   addSiteNames,
-		Describe: describeDevice,
+		Enrich:         addSiteNames,
+		Describe:       describeDevice,
+		DescribeFlags:  deviceDescribeFlags,
+		DescribeOutput: "a summary and its tables, followed by the configuration and the stats in YAML. -o json and -o yaml print one document: config and stats, plus ports (switches and WAN edges), alarms and events.",
 	}
 }
 
@@ -574,7 +576,7 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 		return nil, err
 	}
 	if e.SiteID == "" {
-		return nil, fmt.Errorf("device %q is not assigned to a site", name)
+		return nil, fmt.Errorf("device %q is not assigned to a site: it has no configuration or stats to describe; see it with `mistctl get inventory --state unassigned -o wide`", name)
 	}
 	cl, err := a.client()
 	if err != nil {
@@ -600,7 +602,7 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 		}
 		return output.Text(c[k])
 	}
-	return (&described{
+	d := (&described{
 		Header: [][2]string{
 			{"Name", pick("name")},
 			{"ID", e.ID},
@@ -617,7 +619,10 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 			{"Clients", output.Text(s["num_clients"])},
 		},
 		Doc: combine("config", cfg.Body, "stats", bodyOrNil(stats, serr)),
-	}).noteUnavailable(a, "stats", serr), nil
+	}).noteUnavailable(a, "stats", serr)
+	d.Primary = d.Doc
+	enrichDevice(ctx, a, cl, d, site, sleOr(pick("mac"), e.MAC), sleOr(pick("type"), e.Type))
+	return d, nil
 }
 
 // ---- helpers --------------------------------------------------------------
