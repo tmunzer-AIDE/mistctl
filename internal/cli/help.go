@@ -49,8 +49,8 @@ var resourceHelps = map[string]resourceHelp{
 		group: "inventory", title: "site",
 		about:            "--sitegroup and --template keep the sites of a site group, or the sites using an RF, AP, switch, WAN edge or alarm template (by name or ID).",
 		examples:         []string{"get sites", "get sites -o wide", "get site HQ -o yaml", "get sites --sitegroup EMEA", "get sites --template Campus-Switches"},
-		describe:         "Prints the site object (GET /sites/{site_id}) and its counters (connected APs, switches and gateways, clients). This is the site itself; see `describe site-settings` (and --derived) for its settings.",
-		describeExamples: []string{"describe site HQ"},
+		describe:         "Health summary of a site: the site object (GET /sites/{site_id}) and its counters (connected APs, switches and gateways, clients), the devices that are not connected (GET /sites/{site_id}/stats/devices), the unacknowledged alarms of the window, newest first (GET /sites/{site_id}/alarms/search, first 20) and the SLE scores of the window (GET /orgs/{org_id}/insights/sites-sle, one call per family the site has devices for: Wi-Fi, wired, WAN; the endpoint is org-wide, so 1 call per 1000 sites of the org). --duration (default 1d) or --start/--end set the window of the alarms and of the SLE scores. 4 to 7 API calls; a section that cannot be read is reported and does not fail the command. Next steps: `describe alarm ID`, `describe sle METRIC --site X`, `describe device NAME`. This is the site itself; see `describe site-settings` (and --derived) for its settings.",
+		describeExamples: []string{"describe site HQ", "describe site HQ --duration 7d", "describe site HQ -o json"},
 	},
 	"devices": {
 		group: "inventory", title: "device",
@@ -64,9 +64,9 @@ the API for APs, switches and gateways.`,
 			"get devices -A --type mxedge",
 			"get device ap-lobby-01 -o yaml",
 		},
-		describe:         "Prints the device configuration and its live stats. NAME can be a device name, ID or MAC address; Mist Edges are found too.",
+		describe:         "Prints the device configuration and its live stats, and what happened to it. NAME can be a device name, ID or MAC address; Mist Edges are found too. After the configuration and the stats (GET /sites/{site_id}/devices/{device_id} and /sites/{site_id}/stats/devices/{device_id}), it adds how many physical ports of a switch or WAN edge are up (GET /sites/{site_id}/stats/ports/search), the unacknowledged alarms naming the device over --duration (default 1d; GET /sites/{site_id}/alarms/search, filtered on the device, at most 3 pages of site alarms) and its 10 newest events over --duration (GET /sites/{site_id}/devices/events/search). 4 API calls for an AP, 5 for a switch or a WAN edge (2 before); a section that cannot be read is reported and does not fail the command. Mist Edges get their own description, without these sections.",
 		describeOrgWide:  true,
-		describeExamples: []string{"describe device ap-lobby-01", "describe device 5c:5b:35:00:11:22 -o json"},
+		describeExamples: []string{"describe device ap-lobby-01", "describe device sw-core --duration 7d", "describe device 5c:5b:35:00:11:22 -o json"},
 	},
 	"clients": {
 		group: "inventory", title: "client",
@@ -152,7 +152,8 @@ does not set it.`,
 		short: "Mist NAC clients: authentication result, NAC rule, VLAN",
 		about: `Searches the clients that authenticated through Mist NAC during --duration
 (default 1d), newest first. Every filter is applied by the API. Use
-` + "`get events --source nac`" + ` for the authentication events of a client.`,
+` + "`get events --source nac`" + ` for the authentication events of a client, and
+` + "`describe nac-rule NAME`" + ` for the rule it matched.`,
 		examples: []string{
 			"get nac-clients",
 			"get nac-clients --status denied --duration 7d",
@@ -160,6 +161,9 @@ does not set it.`,
 			"get nac-clients --site HQ --ssid Corp --auth-type eap-tls",
 			"get nac-client aa:bb:cc:dd:ee:ff -o yaml",
 		},
+		describeOrgWide:  true,
+		describe:         "Explains the last Mist NAC verdict of a client, given by its MAC address: why it was permitted or denied, and what it was given. Over --duration (default 7d) or --start/--end, it prints the client as its last authentication left it (status, authentication type, username, certificate, VLAN, SSID or port, device) (GET /orgs/{org_id}/nac_clients/search), the NAC rule it matched with its action, order and NAC tags by name (GET /orgs/{org_id}/nacrules and /nactags), the labels of its user MAC entry (GET /orgs/{org_id}/usermacs/search) and its last 10 authentication events with their reason (GET /orgs/{org_id}/nac_clients/events/search). A client that matched no rule (denied by default) is said to be so. 5 API calls (3 when the client matched no rule); a section that cannot be read is reported and does not fail the command.",
+		describeExamples: []string{"describe nac-client aa:bb:cc:dd:ee:ff", "describe nac-client aa:bb:cc:dd:ee:ff --duration 30d", "describe nac-client aa:bb:cc:dd:ee:ff -o json"},
 	},
 	"wan-clients": {
 		group: "inventory", title: "WAN client",
@@ -170,6 +174,41 @@ does not set it.`,
 			"get wan-clients --site Branch-12 --network corp-lan",
 			"get wan-clients --ip 10.1.0.25 -o yaml",
 		},
+	},
+	"licenses": {
+		group: "inventory", title: "license type",
+		short: "License entitlement, consumption and availability per type, or a site's usage",
+		about: `Without a site (or with -A), shows one row per license type (SUB-MAN,
+SUB-SW6, ...) from the org license summary: ENTITLED, USED and AVAILABLE
+(entitled minus used; negative when more is consumed than entitled).
+-o wide adds FULLY-LOADED (what every device would need with every feature
+on), the number of active SUBSCRIPTIONS and the NEXT-EXPIRY date.
+
+With a site, shows the licenses the site uses (SITE-USAGE) next to the org
+entitlement and consumption (ORG-ENTITLED, ORG-USED). One API call either
+way. The rows are built by mistctl: -o json and -o yaml print them, not the
+API answer.`,
+		examples: []string{
+			"get licenses",
+			"get licenses -o wide",
+			"get licenses --site HQ",
+			"get license SUB-MAN -o yaml",
+		},
+	},
+	"nac-rules": {
+		group: "config", title: "NAC rule",
+		about: `Lists the Mist NAC rules in evaluation order (ORDER, smallest first; the
+first enabled rule that matches decides). MATCH-TAGS and APPLY-TAGS show the
+NAC tags by name, and MATCH the other criteria (auth type, port types, number
+of sites or site groups...). Two API calls: the rules and the NAC tags.
+NAC-RULE in ` + "`get nac-clients`" + ` names the rule a client matched.`,
+		examples: []string{
+			"get nac-rules",
+			"get nac-rules -o wide",
+			"get nac-rule Corp-EAP-TLS -o yaml",
+		},
+		describe:         "Prints the rule's match and not-match conditions and its action, with every referenced NAC tag resolved: its name and what it matches or assigns (VLAN, RADIUS group, session timeout...). The document holds the rule and those tags. NAME is the rule name or ID. Two API calls.",
+		describeExamples: []string{"describe nac-rule Corp-EAP-TLS", "describe nac-rule Corp-EAP-TLS -o yaml"},
 	},
 	"alarmtemplates": {
 		group: "config", title: "alarm template",
@@ -323,6 +362,12 @@ until --limit matching events are found.
 --duration (default 1d). --sle picks the family and so the columns: wifi
 (default), wired or wan. With a site, only that site is shown.`,
 		examples: []string{"get sles -A", "get sles -A --sle wired --duration 7d", "get sles --site HQ --sle wan"},
+		describe: "Explains one SLE metric of a site. METRIC is the metric name of the API, e.g. time-to-connect, failed-to-connect (the SUCCESSFUL-CONNECT column of `get sles`; successful-connect is accepted too), coverage, capacity, roaming, throughput, ap-health, switch-health-v3, switch-throughput, gateway-health, wan-link-health or application-health. An unknown name lists the metrics of the site; some exist in several versions (switch-health, switch-health-v2, ...) and a version without data names the others. Over --duration (default 1d) or --start/--end, it prints the success rate, as `get sles` shows it, and the classifiers behind the degraded part, ranked by their share of it and counted in their own unit (user-minutes, attempts, ...) (GET /sites/{site_id}/sle/site/{site_id}/metric/{metric}/summary-trend; 1 API call). --with impacted adds the most degraded clients and APs (switches and wired clients for a wired metric, gateways and interfaces for a WAN metric; 2 more API calls).",
+		describeExamples: []string{
+			"describe sle time-to-connect --site HQ",
+			"describe sle failed-to-connect --site HQ --duration 4h --with impacted",
+			"describe sle wan-link-health --site HQ --duration 7d -o json",
+		},
 	},
 	"rrm": {
 		group: "monitoring", title: "RRM state",
@@ -376,6 +421,26 @@ newest ones); pass --limit 0 for all of them.`,
 			"get audit-logs -A --admin \"Jane Doe\" --duration 7d",
 			"get audit-logs -A --text \"Update WLAN\" -o wide",
 			"get audit-logs --site HQ --start 2026-11-16T08:00 --end 2026-11-16T12:00 -o yaml",
+		},
+	},
+	"config-history": {
+		group: "monitoring", title: "configuration history entry",
+		short: "Configurations Mist pushed to the APs of a site during a time window",
+		about: `Lists the configurations Mist recorded for the devices of a site during
+--duration (default 1d), or between --start and --end, newest first: one row
+per push, with the firmware version, SSIDs and radio channels (band:channel)
+of the device at that time. Use it with ` + "`get audit-logs`" + ` to see what an
+administrator change did to a device. -o yaml shows every field (WLANs with
+their VLANs, radio MACs, errors).
+
+Mist records this history for APs. --device keeps one device (also applied
+locally, as the API does not always filter on it) and, without --site, uses
+the site the device is assigned to.`,
+		examples: []string{
+			"get config-history --site HQ",
+			"get config-history --device ap-lobby --duration 7d",
+			"get config-history --site HQ --start 2026-11-16 --end 2026-11-17 -o wide",
+			"get config-history --device ap-lobby -o yaml",
 		},
 	},
 	"tunnels": {
@@ -532,15 +597,17 @@ func (r *resource) describeLong() string {
 		body = fmt.Sprintf("Prints the full configuration of one %s. NAME is its name or ID.", r.title())
 	}
 	scope := r.scopeHelp()
+	if r.DescribeSite {
+		scope = "Scope: site. Needs a site: --site, or the default site of the current context."
+	}
 	if r.DescribeOrgWide {
 		scope = wrap(fmt.Sprintf("Scope: org. The %s is looked up in the whole org of the current context (or --org), whatever the site.", r.title()))
 	}
-	return strings.Join([]string{
-		r.describeShort() + ".",
-		body,
-		scope,
-		"Output: a short summary followed by the full document in YAML. With -o json\nor -o yaml only the document is printed.",
-	}, "\n\n")
+	out := "Output: a short summary followed by the full document in YAML. With -o json\nor -o yaml only the document is printed."
+	if r.DescribeOutput != "" {
+		out = wrap("Output: " + r.DescribeOutput)
+	}
+	return strings.Join([]string{r.describeShort() + ".", body, scope, out}, "\n\n")
 }
 
 // fieldLabel names an API field in help sentences.

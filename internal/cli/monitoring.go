@@ -415,13 +415,13 @@ var sleKinds = []string{"wifi", "wired", "wan"}
 
 func sleColumns(kind string) []output.Column {
 	cols := []output.Column{output.Col("SITE", "site_name", "site_id")}
-	pct := func(h, p string) output.Column { return output.Col(h, p).WithFormat(percent) }
+	pct := func(h string, p ...string) output.Column { return output.Col(h, p...).WithFormat(percent) }
 	switch kind {
 	case "wired":
 		cols = append(cols,
 			output.Col("SWITCHES", "num_switches"),
 			output.Col("CLIENTS", "num_clients"),
-			pct("SWITCH-HEALTH", "switch-health"),
+			pct("SWITCH-HEALTH", "switch-health", "switch-health-v2"),
 			pct("THROUGHPUT", "switch-throughput"),
 			pct("BANDWIDTH", "switch-bandwidth"),
 		)
@@ -431,7 +431,7 @@ func sleColumns(kind string) []output.Column {
 			output.Col("CLIENTS", "num_clients"),
 			pct("GATEWAY-HEALTH", "gateway-health"),
 			pct("WAN-LINK-HEALTH", "wan-link-health"),
-			pct("APP-HEALTH", "application_health"),
+			pct("APP-HEALTH", "application-health", "application_health"),
 		)
 	default:
 		cols = append(cols,
@@ -453,13 +453,18 @@ func sleColumns(kind string) []output.Column {
 func slesResource() *resource {
 	return &resource{
 		Name: "sles", Singular: "sle", Aliases: []string{"sle-scores"},
-		Short:      "SLE scores per site over --duration (--sle wifi, wired or wan)",
-		Scope:      "org/site",
-		Endpoint:   "GET /api/v1/orgs/{org_id}/insights/sites-sle",
-		Columns:    sleColumns("wifi"),
-		ColumnsFor: func(o *listOpts) []output.Column { return sleColumns(o.sle) },
-		MatchKeys:  []string{"site_id", "site_name"},
-		FlagValues: map[string][]string{"sle": sleKinds},
+		Short:          "SLE scores per site over --duration (--sle wifi, wired or wan)",
+		Scope:          "org/site",
+		Endpoint:       "GET /api/v1/orgs/{org_id}/insights/sites-sle",
+		Columns:        sleColumns("wifi"),
+		ColumnsFor:     func(o *listOpts) []output.Column { return sleColumns(o.sle) },
+		MatchKeys:      []string{"site_id", "site_name"},
+		Describe:       describeSLE,
+		DescribeArg:    "METRIC",
+		DescribeFlags:  sleDescribeFlags,
+		DescribeSite:   true,
+		DescribeOutput: "a summary and the classifiers table, plus the impacted tables with --with impacted. -o json and -o yaml print one document: summary (what mistctl computed), sle (the API response with its time series) and the impacted lists.",
+		FlagValues:     map[string][]string{"sle": sleKinds},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.sle, "sle", "wifi", "SLE family: wifi, wired, wan")
 			addWindowFlags(fs, o, "1d", "time window")

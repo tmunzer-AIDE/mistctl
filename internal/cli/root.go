@@ -126,6 +126,7 @@ Get started:
 		newGetCmd(a),
 		newDescribeCmd(a),
 		newInsightsCmd(a),
+		newTroubleshootCmd(a),
 		newAttachCmd(a),
 		newWhoamiCmd(a),
 		newUsageCmd(a),
