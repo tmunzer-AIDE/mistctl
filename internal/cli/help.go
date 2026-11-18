@@ -414,6 +414,26 @@ newest ones); pass --limit 0 for all of them.`,
 			"get audit-logs --site HQ --start 2026-11-16T08:00 --end 2026-11-16T12:00 -o yaml",
 		},
 	},
+	"config-history": {
+		group: "monitoring", title: "configuration history entry",
+		short: "Configurations Mist pushed to the APs of a site during a time window",
+		about: `Lists the configurations Mist recorded for the devices of a site during
+--duration (default 1d), or between --start and --end, newest first: one row
+per push, with the firmware version, SSIDs and radio channels (band:channel)
+of the device at that time. Use it with ` + "`get audit-logs`" + ` to see what an
+administrator change did to a device. -o yaml shows every field (WLANs with
+their VLANs, radio MACs, errors).
+
+Mist records this history for APs. --device keeps one device (also applied
+locally, as the API does not always filter on it) and, without --site, uses
+the site the device is assigned to.`,
+		examples: []string{
+			"get config-history --site HQ",
+			"get config-history --device ap-lobby --duration 7d",
+			"get config-history --site HQ --start 2026-11-16 --end 2026-11-17 -o wide",
+			"get config-history --device ap-lobby -o yaml",
+		},
+	},
 	"tunnels": {
 		group: "stats", title: "tunnel",
 		short: "WAN edge tunnels, or AP-to-Mist Edge tunnels (--type wxtunnel), with their state",
