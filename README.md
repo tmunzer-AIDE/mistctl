@@ -134,7 +134,7 @@ mistctl get rrm --site HQ --band 5
 | `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current` (one row per band: APs per channel/power, noise, neighbors; `-o wide` adds the RF template limits, `-o json` keeps any per-AP plan under `aps`), `/sites/{id}/rrm/events` |
 | `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`); `describe mxedge` finds org-level and site-assigned Mist Edges and shows which one it is (`Scope`) |
 | `bgp-peers`, `ospf-peers` | `bgp`, `ospf` | org or site | `/stats/bgp_peers/search`, `/stats/ospf_peers/search` with `--device`, `--vrf`, `--up`, `--neighbor`/`--peer`, `--start`/`--end` |
-| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`, `--port`, `--neighbor`, `--speed`, `--poe`, `--auth-state`, `--stp-state`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port, breakout ports included (`sw-core:et-0/0/48:0`) |
+| `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`, `--port`, `--neighbor`, `--speed`, `--poe`, `--auth-state`, `--stp-state`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port, breakout ports included (`sw-core:et-0/0/48:0`); `describe port DEVICE:PORT` adds the neighbor device, the device `port_config` entry, the wired clients on the port and its last events over `--duration` (3 more API calls) |
 | `zones` | | site | `/sites/{id}/stats/zones` |
 | `tunnels` | `tun` | org or site | `/orgs/{id}/stats/tunnels/search` (`--type wan\|wxtunnel`, `--device`, `--up`, `--peer`) |
 
