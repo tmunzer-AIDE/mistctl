@@ -254,8 +254,8 @@ func TestAlarms(t *testing.T) {
 	if _, err := runErr("get", "alarms", "--severity", "fatal"); err == nil {
 		t.Error("expected invalid --severity error")
 	}
-	if _, err := runErr("describe", "alarm", "a1"); err == nil {
-		t.Error("alarms should have no describe")
+	if _, err := runErr("describe", "event", "a1"); err == nil {
+		t.Error("events should have no describe")
 	}
 	assertContains(t, run(t, "__complete", "get", "alarms", "--group", ""), "infrastructure", "marvis")
 }
@@ -402,7 +402,9 @@ func TestHelpTexts(t *testing.T) {
 	}
 	out := run(t, "get", "-h")
 	assertContains(t, out, "Inventory:", "Configuration:", "Monitoring:", "Live stats:")
-	assertNotContains(t, run(t, "describe", "-h"), "Monitoring:", "Describe a ")
+	assertNotContains(t, run(t, "describe", "-h"), "Describe a ")
+	assertContains(t, run(t, "describe", "-h"), "Monitoring:")
+	assertContains(t, run(t, "describe", "alarm", "-h"), "--with", "--duration", "API calls")
 	assertContains(t, run(t, "describe", "port", "-h"), "[DEVICE:]PORT")
 	// NAME can match derived fields such as the device name
 	assertContains(t, run(t, "get", "ports", "sw-core", "--site", "HQ"), "ge-0/0/1", "ge-0/0/2")
