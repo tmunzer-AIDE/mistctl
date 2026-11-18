@@ -19,7 +19,7 @@ func TestLicenses(t *testing.T) {
 				{"type":"SUB-MAN","quantity":3,"start_time":1790000000,"end_time":1810000000},
 				{"type":"SUB-MAN","quantity":9,"start_time":1700000000,"end_time":1710000000},
 				{"type":"SUB-ENG","quantity":8,"start_time":1790000000,"end_time":1810000000}]}`),
-		"/api/v1/sites/" + siteHQ + "/licenses/usages": body(`{"usages":{"SUB-MAN":3,"SUB-EX12":2},"org_entitled":{"SUB-MAN":8}}`),
+		"/api/v1/sites/" + siteHQ + "/licenses/usages": body(`{"usage":{"SUB-MAN":3,"SUB-EX12":2},"org_entitled":{"SUB-MAN":8},"org_usage":{"SUB-MAN":10,"SUB-EX12":2}}`),
 	})
 
 	out := run(t, "get", "licenses", "-o", "wide")
@@ -46,7 +46,16 @@ func TestLicenses(t *testing.T) {
 	if !strings.Contains(out, "SITE-USAGE") || !strings.Contains(out, "ORG-ENTITLED") || strings.Contains(out, "AVAILABLE") {
 		t.Fatalf("site columns expected:\n%s", out)
 	}
-	if !strings.Contains(out, "SUB-EX12") {
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Fields(l)
+		if len(f) > 0 && f[0] == "SUB-MAN" && (f[1] != "3" || f[2] != "8" || f[3] != "10") {
+			t.Fatalf("unexpected site SUB-MAN row: %q", l)
+		}
+		if len(f) > 0 && f[0] == "SUB-EX12" && f[1] != "2" {
+			t.Fatalf("unexpected site SUB-EX12 row: %q", l)
+		}
+	}
+	if !strings.Contains(out, "SUB-EX12") || !strings.Contains(out, "ORG-USED") {
 		t.Fatalf("site usage missing:\n%s", out)
 	}
 	out = run(t, "get", "license", "SUB-MAN", "-A", "-o", "name")

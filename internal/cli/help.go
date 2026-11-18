@@ -181,7 +181,7 @@ SUB-SW6, ...) from the org license summary: ENTITLED, USED and AVAILABLE
 on), the number of active SUBSCRIPTIONS and the NEXT-EXPIRY date.
 
 With a site, shows the licenses the site uses (SITE-USAGE) next to the org
-entitlement. One API call either way. The rows are built by mistctl: -o json
+entitlement and consumption. One API call either way. The rows are built by mistctl: -o json
 and -o yaml print them, not the API answer.`,
 		examples: []string{
 			"get licenses",

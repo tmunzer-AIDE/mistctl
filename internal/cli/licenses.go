@@ -46,6 +46,7 @@ var siteLicenseColumns = []output.Column{
 	output.Col("TYPE", "type"),
 	output.Col("SITE-USAGE", "site_usage"),
 	output.Col("ORG-ENTITLED", "entitled"),
+	output.Col("ORG-USED", "used"),
 }
 
 // licenseColumns picks the columns of the scope List read.
@@ -142,29 +143,39 @@ func orgLicenseRows(body json.RawMessage, at time.Time) ([]json.RawMessage, erro
 }
 
 // siteLicenseRows builds one row per license type from the site usage: what
-// the site uses, next to what the org is entitled to.
+// the site uses, next to what the org is entitled to and uses.
 func siteLicenseRows(body json.RawMessage) ([]json.RawMessage, error) {
+	// The API answers "usage" (the spec says "usages": both are read).
 	var s struct {
+		Usage       map[string]int `json:"usage"`
 		Usages      map[string]int `json:"usages"`
 		OrgEntitled map[string]int `json:"org_entitled"`
+		OrgUsage    map[string]int `json:"org_usage"`
 	}
 	if err := json.Unmarshal(body, &s); err != nil {
 		return nil, err
 	}
-	types := map[string]bool{}
-	for t := range s.Usages {
-		types[t] = true
+	usage := s.Usage
+	if len(usage) == 0 {
+		usage = s.Usages
 	}
-	for t := range s.OrgEntitled {
-		types[t] = true
+	types := map[string]bool{}
+	for _, m := range []map[string]int{usage, s.OrgEntitled, s.OrgUsage} {
+		for t := range m {
+			types[t] = true
+		}
 	}
 	rows := make([]json.RawMessage, 0, len(types))
 	for _, t := range sortedKeys(types) {
-		rows = append(rows, mustJSON(map[string]any{
+		row := map[string]any{
 			"type":       t,
-			"site_usage": s.Usages[t],
+			"site_usage": usage[t],
 			"entitled":   s.OrgEntitled[t],
-		}))
+		}
+		if s.OrgUsage != nil {
+			row["used"] = s.OrgUsage[t]
+		}
+		rows = append(rows, mustJSON(row))
 	}
 	return rows, nil
 }
