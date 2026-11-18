@@ -58,6 +58,12 @@ func describeEntry(e cache.Entry) string {
 
 func (a *app) completeNames(r *resource) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if r.CompleteNames != nil {
+			if len(args) > 0 && cmd.Args != nil && cmd.Args(cmd, append(args, toComplete)) != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp // describe takes one NAME
+			}
+			return r.CompleteNames(a, cmd, toComplete), cobra.ShellCompDirectiveNoFileComp
+		}
 		if r.IndexKind == "" {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
