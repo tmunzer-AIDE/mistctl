@@ -111,6 +111,8 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 							items[i], items[j] = items[j], items[i]
 						}
 					}
+				} else if r.SortAsc != "" {
+					sortAsc(items, r.SortAsc)
 				} else {
 					output.SortBy(items, cols[0])
 				}

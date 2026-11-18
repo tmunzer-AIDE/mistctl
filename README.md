@@ -119,6 +119,7 @@ mistctl get rrm --site HQ --band 5
 | `site-settings` | | site | `/sites/{id}/setting`; `--derived` for the effective settings (`/sites/{id}/setting/derived`) |
 | `deviceprofiles` | `profiles` | org | `/orgs/{id}/deviceprofiles` (one call per type, or `--type`) |
 | `sitegroups` | | org | `/orgs/{id}/sitegroups` (describe lists the sites) |
+| `nac-rules` | `nacrules` | org | `/orgs/{id}/nacrules` in evaluation order, NAC tags by name from `/orgs/{id}/nactags`; `describe nac-rule` resolves every referenced tag (what it matches or assigns) |
 | `alarmtemplates` | | org | `/orgs/{id}/alarmtemplates` |
 | `webhooks` | `wh` | org or site | `/orgs/{id}/webhooks`, `/sites/{id}/webhooks`; secrets and headers are redacted |
 | `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration` or `--start`/`--end`, `--sort`, `--group`, `--severity`, `--type`, `--acked`, `--ack-admin`, `--status` |
