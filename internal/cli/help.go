@@ -433,9 +433,9 @@ of the device at that time. Use it with ` + "`get audit-logs`" + ` to see what a
 administrator change did to a device. -o yaml shows every field (WLANs with
 their VLANs, radio MACs, errors).
 
-Mist records this history for APs. --device keeps one device (also applied
-locally, as the API does not always filter on it) and, without --site, uses
-the site the device is assigned to.`,
+Mist records this history for APs. --device keeps one device, by name, ID
+or MAC (also applied locally, as the API does not always filter on it) and,
+without --site, uses the site the inventory assigns the device to.`,
 		examples: []string{
 			"get config-history --site HQ",
 			"get config-history --device ap-lobby --duration 7d",

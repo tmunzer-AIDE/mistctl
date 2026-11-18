@@ -72,6 +72,14 @@ func listConfigHistory(ctx context.Context, a *app, o *listOpts) ([]json.RawMess
 		if cache.IsMAC(o.device) {
 			m := cache.NormalizeMAC(o.device)
 			mac = &m
+			// With no site selected, the inventory says where the device
+			// is. With a site, the MAC is only a filter (no lookup).
+			if !hasSite {
+				if site, err = deviceSiteByMAC(ctx, a, o.device); err != nil {
+					return nil, err
+				}
+				hasSite = true
+			}
 		} else {
 			e, err := a.lookupDevice(ctx, o.device)
 			if err != nil {
@@ -108,6 +116,36 @@ func listConfigHistory(ctx context.Context, a *app, o *listOpts) ([]json.RawMess
 			return cl.SDK.SitesDevices().SearchSiteDeviceConfigHistory(ctx, site, nil, mac, &limit, w.start, w.end, nil, srt, after)
 		})
 	})
+}
+
+// deviceSiteByMAC finds the site of an inventory device from its MAC, for a
+// site-level search run without a site. When the inventory cannot say, the
+// error asks for --site.
+func deviceSiteByMAC(ctx context.Context, a *app, mac string) (uuid.UUID, error) {
+	m, err := a.matches(ctx, kindDevices, mac)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	sites := map[string]bool{}
+	for _, e := range m {
+		if e.SiteID != "" {
+			sites[strings.ToLower(e.SiteID)] = true
+		}
+	}
+	switch {
+	case len(m) == 0:
+		return uuid.Nil, fmt.Errorf("no device of the org has MAC %s, so its site is unknown: pass --site", mac)
+	case len(sites) == 0:
+		return uuid.Nil, fmt.Errorf("device %s is not assigned to a site: pass --site", mac)
+	case len(sites) > 1:
+		return uuid.Nil, fmt.Errorf("MAC %s matches devices on %d sites: pass --site", mac, len(sites))
+	}
+	for id := range sites {
+		if u, err := uuid.Parse(id); err == nil {
+			return u, nil
+		}
+	}
+	return uuid.Nil, fmt.Errorf("device %s has an invalid site ID: pass --site", mac)
 }
 
 // radioChannels formats the radios of a config history entry as
