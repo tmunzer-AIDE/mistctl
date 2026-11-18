@@ -86,6 +86,9 @@ be described; use ` + "`mistctl get RESOURCE -o yaml`" + ` to see all their fiel
 					}
 					fmt.Fprintln(a.out)
 				}
+				if d.NoYAML {
+					return nil
+				}
 				if len(d.Primary) > 0 {
 					return output.WriteYAML(a.out, d.Primary)
 				}

@@ -83,7 +83,11 @@ func describeSLE(ctx context.Context, a *app, metric string) (*described, error)
 	if err != nil {
 		return nil, err
 	}
-	metric = strings.ToLower(strings.TrimSpace(metric))
+	asked := strings.ToLower(strings.TrimSpace(metric))
+	metric = asked
+	if m, ok := sleMetricAliases[asked]; ok {
+		metric = m
+	}
 
 	trend, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SleSummaryTrend], error) {
 		return cl.SDK.SitesSLEs().GetSiteSleSummaryTrend(ctx, site, models.SiteSleMetricSummaryScopeParametersEnum_SITE, site.String(), metric, w.start, w.end, nil)
@@ -97,55 +101,78 @@ func describeSLE(ctx context.Context, a *app, metric string) (*described, error)
 		return nil, fmt.Errorf("SLE metric %q could not be read for this site: %v%s", metric, err, sleMetricsHint(ctx, cl, site))
 	}
 	t := output.Decode(trend.Body)
+	// The score comes from the metric's own samples. Their unit is not
+	// given by the API (x_label is the time axis, y_label the unit of the
+	// measured value), so these counts are only used as a ratio.
 	total := sleSum(output.Get(t, "sle.samples.total"))
 	degraded := sleSum(output.Get(t, "sle.samples.degraded"))
-	unit := output.Text(output.Get(t, "sle.x_label"))
 
 	// classifiers, ranked by their share of the degraded samples
+	// Classifiers count in their own unit (y_label: user-minutes, attempts,
+	// ...), which is not the unit of the metric's samples: each one is
+	// compared with its own total, never with the metric's.
 	type classifier struct {
 		Name     string  `json:"name"`
 		Degraded float64 `json:"degraded"`
+		Total    float64 `json:"total"`
 		Share    float64 `json:"share_of_degraded"`
 		OfTotal  float64 `json:"share_of_total"`
 	}
 	var cls []classifier
 	clsDegraded := 0.0
+	unit := ""
 	list, _ := t["classifiers"].([]any)
 	for _, e := range list {
 		m, _ := e.(map[string]any)
 		d := sleSum(output.Get(m, "samples.degraded"))
-		cls = append(cls, classifier{Name: output.Text(m["name"]), Degraded: d})
+		cls = append(cls, classifier{Name: output.Text(m["name"]), Degraded: d, Total: sleSum(output.Get(m, "samples.total"))})
 		clsDegraded += d
+		if unit == "" {
+			unit = output.Text(m["y_label"])
+		}
 	}
-	sort.SliceStable(cls, func(i, j int) bool { return cls[i].Degraded > cls[j].Degraded })
+	sort.SliceStable(cls, func(i, j int) bool {
+		if cls[i].Degraded != cls[j].Degraded {
+			return cls[i].Degraded > cls[j].Degraded
+		}
+		return cls[i].Name < cls[j].Name
+	})
 	rows := make([]json.RawMessage, len(cls))
 	for i := range cls {
 		if clsDegraded > 0 {
 			cls[i].Share = cls[i].Degraded / clsDegraded
 		}
-		if total > 0 {
-			cls[i].OfTotal = cls[i].Degraded / total
+		if cls[i].Total > 0 {
+			cls[i].OfTotal = cls[i].Degraded / cls[i].Total
 		}
 		rows[i] = mustJSON(cls[i])
 	}
 
 	summary := map[string]any{
-		"metric":      metric,
-		"site_id":     site.String(),
-		"start":       t["start"],
-		"end":         t["end"],
-		"unit":        unit,
-		"total":       total,
-		"degraded":    degraded,
-		"classifiers": cls,
+		"metric":          metric,
+		"site_id":         site.String(),
+		"start":           t["start"],
+		"end":             t["end"],
+		"total":           total,
+		"degraded":        degraded,
+		"classifier_unit": unit,
+		"classifiers":     cls,
 	}
 	rate := ""
 	if total > 0 {
 		summary["success_rate"] = 1 - degraded/total
 		rate = slePct(total-degraded, total)
+		// never round a degraded metric up to a clean 100%
+		if degraded > 0 && rate == "100.0%" {
+			rate = ">99.9%"
+		}
 	} else {
 		summary["success_rate"] = nil
 		rate = "no data in the window"
+		// some metrics exist in several versions and only one has data
+		if rel := sleRelatedMetrics(ctx, cl, site, metric); len(rel) > 0 {
+			rate += "; related metrics of this site: " + strings.Join(rel, ", ")
+		}
 	}
 	if cls == nil {
 		summary["classifiers"] = []classifier{}
@@ -162,21 +189,23 @@ func describeSLE(ctx context.Context, a *app, metric string) (*described, error)
 			output.HumanDuration(secondsDuration(en-st)))
 	}
 	top := ""
-	if len(cls) > 0 && cls[0].Degraded > 0 {
+	switch {
+	case len(cls) > 0 && cls[0].Degraded > 0:
 		top = fmt.Sprintf("%s (%s of the degraded %s)", cls[0].Name, slePct(cls[0].Degraded, clsDegraded), sleOr(unit, "samples"))
-	} else if total > 0 {
+	case total > 0 && degraded > 0:
+		top = "not attributed: the metric is degraded but its classifiers report nothing"
+	case total > 0:
 		top = "none: nothing degraded in the window"
 	}
-	degradedLine := ""
-	if total > 0 {
-		degradedLine = fmt.Sprintf("%s of %s %s", sleCount(degraded), sleCount(total), sleOr(unit, "samples"))
+	name := metric
+	if asked != metric {
+		name = fmt.Sprintf("%s (the API name of %s)", metric, asked)
 	}
 	d.Header = [][2]string{
-		{"Metric", metric},
+		{"Metric", name},
 		{"Site", siteLabel(a.siteNames(ctx), site.String())},
 		{"Window", window},
 		{"Success rate", rate},
-		{"Degraded", degradedLine},
 		{"Top classifier", top},
 	}
 	if len(rows) > 0 {
@@ -184,6 +213,7 @@ func describeSLE(ctx context.Context, a *app, metric string) (*described, error)
 			output.Col("CLASSIFIER", "name"),
 			output.Col("SHARE", "share_of_degraded").WithFormat(percent),
 			output.Col("DEGRADED", "degraded").WithFormat(sleCountAny),
+			output.Col("TOTAL", "total").WithFormat(sleCountAny),
 			output.Col("OF-TOTAL", "share_of_total").WithFormat(percent),
 		}})
 	}
@@ -200,6 +230,10 @@ func describeSLE(ctx context.Context, a *app, metric string) (*described, error)
 			for _, k := range im.listKeys {
 				if raw, ok := output.Decode(r.Body)[k].([]any); ok && len(raw) > 0 {
 					for _, e := range raw {
+						// the API can return a nameless placeholder row (mac "0")
+						if m, _ := e.(map[string]any); output.Text(m["name"]) == "" && len(output.Text(m["mac"])) <= 1 && m["switch_mac"] == nil && m["gateway_mac"] == nil && m["ap_mac"] == nil && m["interface_name"] == nil {
+							continue
+						}
 						items = append(items, mustJSON(e))
 					}
 					break
@@ -222,8 +256,8 @@ func describeSLE(ctx context.Context, a *app, metric string) (*described, error)
 	}
 	d.Header = append(d.Header, s.header...)
 	d.Doc = s.doc()
-	// the summary above says it all; no YAML dump of the time series
-	d.Primary = mustJSON(map[string]any{"success_rate": summary["success_rate"], "total": total, "degraded": degraded, "unit": unit})
+	// the summary and its tables say it all: no YAML dump of the time series
+	d.NoYAML = true
 	return d, nil
 }
 
@@ -296,25 +330,52 @@ func sleImpactedLists(family string) []sleImpacted {
 	}
 }
 
+// sleMetricAliases maps the column names of `get sles` (and close
+// spellings) to the metric names of the API.
+var sleMetricAliases = map[string]string{
+	"successful-connect": "failed-to-connect",
+	"successful_connect": "failed-to-connect",
+	"application_health": "application-health",
+	"time_to_connect":    "time-to-connect",
+}
+
+// sleRelatedMetrics returns the other metrics of the site whose name starts
+// with this one (e.g. switch-health-v2 for switch-health); best effort.
+func sleRelatedMetrics(ctx context.Context, cl *client.Client, site uuid.UUID, metric string) []string {
+	var out []string
+	for _, n := range sleMetricNames(ctx, cl, site) {
+		if n != metric && strings.HasPrefix(n, metric) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // sleMetricsHint lists the SLE metrics of a site for an error message
 // (empty when they cannot be read).
 func sleMetricsHint(ctx context.Context, cl *client.Client, site uuid.UUID) string {
+	names := sleMetricNames(ctx, cl, site)
+	if len(names) == 0 {
+		return ""
+	}
+	return "\nSLE metrics of this site: " + strings.Join(names, ", ")
+}
+
+// sleMetricNames reads the SLE metrics of a site, sorted (nil on error).
+func sleMetricNames(ctx context.Context, cl *client.Client, site uuid.UUID) []string {
 	r, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SiteSleMetrics], error) {
 		return cl.SDK.SitesSLEs().ListSiteSlesMetrics(ctx, site, models.SiteSleMetricsScopeParametersEnum_SITE, site.String())
 	})
 	if err != nil {
-		return ""
+		return nil
 	}
 	m := output.Decode(r.Body)
 	names := stringList(m["enabled"])
 	if len(names) == 0 {
 		names = stringList(m["supported"])
 	}
-	if len(names) == 0 {
-		return ""
-	}
 	sort.Strings(names)
-	return "\nSLE metrics of this site: " + strings.Join(names, ", ")
+	return names
 }
 
 func sleNum(v any) float64 {
