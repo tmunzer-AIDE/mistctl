@@ -295,7 +295,7 @@ func describeAlarm(ctx context.Context, a *app, id string) (*described, error) {
 				})
 			}
 			return client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseDeviceEventsSearch], error) {
-				return cl.SDK.OrgsDevices().SearchOrgDeviceEvents(ctx, org, mac, nil, nil, nil, nil, nil, nil, &limit, &st, &en, nil, client.Ptr(newestFirst), after)
+				return cl.SDK.OrgsDevices().SearchOrgDeviceEvents(ctx, org, mac, nil, &orgEventDeviceTypes, nil, nil, nil, nil, &limit, &st, &en, nil, client.Ptr(newestFirst), after)
 			})
 		})
 		s.unavailable("events", eerr)
