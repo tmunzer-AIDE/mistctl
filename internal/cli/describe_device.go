@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/spf13/pflag"
@@ -68,21 +69,30 @@ func enrichDevice(ctx context.Context, a *app, cl *client.Client, d *described, 
 		if err != nil {
 			note("ports", "Ports", err)
 		} else {
-			up := 0
+			// physical ports only: the stats also list logical interfaces
+			// (irb, vme, me0, ae0, ...), which would inflate the count
+			up, total := 0, 0
 			for _, it := range ports {
-				if output.Text(output.Decode(it)["up"]) == "true" {
+				m := output.Decode(it)
+				if !strings.Contains(output.Text(m["port_id"]), "/") {
+					continue
+				}
+				total++
+				if output.Text(m["up"]) == "true" {
 					up++
 				}
 			}
-			d.Header = append(d.Header, [2]string{"Ports", fmt.Sprintf("%d up of %d (`mistctl get ports --device %s`)", up, len(ports), mac)})
-			d.Doc = appendField(d.Doc, "ports", map[string]int{"total": len(ports), "up": up})
+			if total > 0 {
+				d.Header = append(d.Header, [2]string{"Ports", fmt.Sprintf("%d up of %d physical ports (`mistctl get ports --device %s`)", up, total, mac)})
+			}
+			d.Doc = appendField(d.Doc, "ports", map[string]int{"total": total, "up": up})
 		}
 	}
 
 	// unacknowledged alarms naming the device
 	open := false
 	pages, cut := 0, false
-	alarms, err := client.SearchFiltered(ctx, maxDeviceRows, func(it json.RawMessage) bool {
+	alarms, err := client.SearchFiltered(ctx, maxDeviceRows+1, func(it json.RawMessage) bool {
 		m := output.Decode(it)
 		for _, k := range []string{"aps", "switches", "gateways"} {
 			for _, v := range stringList(m[k]) {
@@ -104,12 +114,16 @@ func enrichDevice(ctx context.Context, a *app, cl *client.Client, d *described, 
 	if err != nil {
 		note("alarms", "Alarms", err)
 	} else {
+		more := len(alarms) > maxDeviceRows
+		if more {
+			alarms = alarms[:maxDeviceRows]
+		}
 		d.Doc = appendField(d.Doc, "alarms", list(alarms))
 		line := "none unacknowledged in the last " + span
 		if n := len(alarms); n > 0 {
 			line = fmt.Sprintf("%d unacknowledged in the last %s", n, span)
-			if n == maxDeviceRows {
-				line = fmt.Sprintf("%d or more unacknowledged in the last %s", n, span)
+			if more {
+				line = fmt.Sprintf("more than %d unacknowledged in the last %s, the %d newest shown (all with `mistctl get alarms --site %s --acked false` over the same window)", n, span, n, site)
 			}
 			d.Tables = append(d.Tables, describedTable{Title: "Unacknowledged alarms naming the device, newest first", Rows: alarms, Cols: []output.Column{
 				output.Col("AGE", "timestamp").WithFormat(output.Age),
@@ -143,12 +157,12 @@ func enrichDevice(ctx context.Context, a *app, cl *client.Client, d *described, 
 		if n == maxDeviceRows {
 			line = fmt.Sprintf("the %d newest of the last %s (more with `mistctl get events --source device --device %s` over the same window)", n, span, mac)
 		}
-		d.Tables = append(d.Tables, describedTable{Title: "Events of the device, newest first", Rows: events, Cols: []output.Column{
-			output.Col("AGE", "timestamp").WithFormat(output.Age),
-			output.Col("TYPE", "type"),
-			output.Col("PORT", "port_id"),
-			output.Col("TEXT", "text").WithFormat(shortText),
-		}})
+		cols := []output.Column{output.Col("AGE", "timestamp").WithFormat(output.Age), output.Col("TYPE", "type")}
+		if typ != "ap" {
+			cols = append(cols, output.Col("PORT", "port_id"))
+		}
+		cols = append(cols, output.Col("TEXT", "text").WithFormat(shortText))
+		d.Tables = append(d.Tables, describedTable{Title: "Events of the device, newest first", Rows: events, Cols: cols})
 	}
 	d.Header = append(d.Header, [2]string{"Events", line})
 }

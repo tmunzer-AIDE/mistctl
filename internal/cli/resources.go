@@ -602,6 +602,12 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 		}
 		return output.Text(c[k])
 	}
+	// the uptime of a device that is not connected is the stale value of
+	// its last connection
+	uptime := ""
+	if st := output.Text(s["status"]); st == "" || st == "connected" {
+		uptime = output.Duration(s["uptime"])
+	}
 	d := (&described{
 		Header: [][2]string{
 			{"Name", pick("name")},
@@ -614,7 +620,7 @@ func describeDevice(ctx context.Context, a *app, name string) (*described, error
 			{"Status", output.Text(s["status"])},
 			{"IP", output.Text(s["ip"])},
 			{"Version", output.Text(s["version"])},
-			{"Uptime", output.Duration(s["uptime"])},
+			{"Uptime", uptime},
 			{"Last seen", ageOf(s["last_seen"])},
 			{"Clients", output.Text(s["num_clients"])},
 		},
