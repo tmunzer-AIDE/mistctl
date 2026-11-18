@@ -142,8 +142,13 @@ func newGetResourceCmd(a *app, r *resource) *cobra.Command {
 			_ = cmd.RegisterFlagCompletionFunc("type", a.completeDefinitions(func(*cobra.Command) string { return "alarms" }))
 		case "events":
 			_ = cmd.RegisterFlagCompletionFunc("type", a.completeDefinitions(func(c *cobra.Command) string {
-				src, _ := c.Flags().GetString("source")
-				return src
+				// same rule as eventSource: the filters pick the
+				// source when --source is not given
+				get := func(n string) string { v, _ := c.Flags().GetString(n); return v }
+				return eventSource(&listOpts{
+					source: get("source"), username: get("username"), clientMAC: get("client"),
+					ssid: get("ssid"), band: get("band"), reason: get("reason"),
+				})
 			}))
 		default:
 			_ = cmd.RegisterFlagCompletionFunc("type", cobra.NoFileCompletions)

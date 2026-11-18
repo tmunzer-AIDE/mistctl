@@ -196,3 +196,30 @@ func TestDescribeMxedgeStatsNotFound(t *testing.T) {
 	out := run(t, "describe", "mxedge", "edge-01")
 	assertContains(t, out, "Stats:", "not found (org-level Mist Edge)", "warning: stats of this org-level Mist Edge were not found")
 }
+
+// Without --source, the filters pick the kind of events.
+func TestEventsSourceFromFilters(t *testing.T) {
+	f := setupMore(t)
+	org, hq := "/api/v1/orgs/"+orgID, "/api/v1/sites/"+siteHQ
+	for _, c := range []struct {
+		args []string
+		path string
+	}{
+		{[]string{"get", "events", "--site", "HQ", "--client", "aa:bb:cc:dd:ee:ff"}, hq + "/clients/events/search"},
+		{[]string{"get", "events", "--site", "HQ", "--ssid", "Corp"}, hq + "/clients/events/search"},
+		{[]string{"get", "events", "--site", "HQ", "--band", "5"}, hq + "/clients/events/search"},
+		{[]string{"get", "events", "--device", "sw-core"}, org + "/devices/events/search"},
+		{[]string{"get", "events"}, org + "/devices/events/search"},
+	} {
+		before := len(f.called(c.path))
+		run(t, c.args...)
+		if len(f.called(c.path)) != before+1 {
+			t.Errorf("%v: expected a search on %s", c.args, c.path)
+		}
+	}
+	assertContains(t, run(t, "get", "events", "--site", "HQ", "--ssid", "Corp"), "CLIENT_AUTHENTICATED", "Corp")
+	// an explicit --source still wins, and still rejects foreign filters
+	if _, err := runErr("get", "events", "--source", "device", "--client", "aa:bb:cc:dd:ee:ff"); err == nil || !strings.Contains(err.Error(), "does not apply") {
+		t.Errorf("expected --client to be rejected for device events, got %v", err)
+	}
+}

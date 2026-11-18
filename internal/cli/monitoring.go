@@ -204,7 +204,7 @@ func eventsResource() *resource {
 		Scope:        "org/site",
 		Endpoint:     "GET /api/v1/orgs/{org_id}/devices/events/search, GET /api/v1/sites/{site_id}/devices/events/search, GET /api/v1/orgs/{org_id}/clients/events/search, GET /api/v1/sites/{site_id}/clients/events/search, GET /api/v1/orgs/{org_id}/events/system/search, GET /api/v1/sites/{site_id}/events/system/search, GET /api/v1/orgs/{org_id}/nac_clients/events/search, GET /api/v1/sites/{site_id}/nac_clients/events/search, GET /api/v1/orgs/{org_id}/wan_clients/events/search, GET /api/v1/sites/{site_id}/wan_clients/events/search",
 		Columns:      eventColumns("device"),
-		ColumnsFor:   func(o *listOpts) []output.Column { return eventColumns(o.source) },
+		ColumnsFor:   func(o *listOpts) []output.Column { return eventColumns(eventSource(o)) },
 		MatchKeys:    []string{"type", "ev_type", "mac", "device_name"},
 		SortDesc:     "timestamp",
 		DefaultLimit: client.PageSize,
@@ -214,7 +214,7 @@ func eventsResource() *resource {
 		},
 		FlagValues: map[string][]string{"source": eventSources, "band": rrmBands, "sort": sortOrders},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
-			fs.StringVar(&o.source, "source", "device", "event source: device, client (wireless), system, nac, wan (WAN edge clients)")
+			fs.StringVar(&o.source, "source", "", "event source: device, client (wireless), system, nac, wan (WAN edge clients). Default: nac with --username; client with --client, --ssid, --band or --reason; else device")
 			addWindowFlags(fs, o, "1d", "search window")
 			addSortFlag(fs, o)
 			fs.StringVar(&o.eventType, "type", "", "event type, e.g. AP_DISCONNECTED, SW_PORT_DOWN, CLIENT_DEAUTHENTICATED, NAC_CLIENT_DENY")
@@ -240,6 +240,22 @@ var eventFlagSources = map[string][]string{
 	"band":     {"client"},
 	"reason":   {"client"},
 	"username": {"nac"},
+}
+
+// eventSource is --source, or when it is not given the source the filters
+// point to: --username only exists for NAC events, and --client, --ssid,
+// --band and --reason mean wireless client events. Everything else,
+// --device included, is a device event search.
+func eventSource(o *listOpts) string {
+	switch {
+	case o.source != "":
+		return o.source
+	case o.username != "":
+		return "nac"
+	case o.clientMAC != "" || o.ssid != "" || o.band != "" || o.reason != "":
+		return "client"
+	}
+	return "device"
 }
 
 func checkEventFlags(o *listOpts) error {
@@ -270,6 +286,7 @@ func checkEventFlags(o *listOpts) error {
 var orgEventDeviceTypes = "ap,switch,gateway"
 
 func listEvents(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
+	o.source = eventSource(o)
 	if !contains(eventSources, o.source) {
 		return nil, fmt.Errorf("invalid --source %q (valid: %s)", o.source, strings.Join(eventSources, ", "))
 	}

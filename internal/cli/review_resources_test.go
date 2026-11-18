@@ -248,6 +248,8 @@ func TestAlarmTemplatesAndDefinitions(t *testing.T) {
 	assertNotContains(t, run(t, "__complete", "get", "alarms", "--type", "dev"), "health_check_failed")
 	assertContains(t, run(t, "__complete", "get", "events", "--source", "client", "--type", ""), "CLIENT_DEAUTHENTICATED")
 	assertContains(t, run(t, "__complete", "get", "events", "--type", "AP"), "AP_DISCONNECTED")
+	// without --source, the filters decide which types complete
+	assertContains(t, run(t, "__complete", "get", "events", "--client", "aa:bb:cc:dd:ee:ff", "--type", ""), "CLIENT_DEAUTHENTICATED")
 }
 
 func TestWebhooks(t *testing.T) {

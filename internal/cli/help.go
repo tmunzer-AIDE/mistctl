@@ -294,6 +294,11 @@ only that site.`,
 --end, newest first. --source picks the kind of events: device (default),
 client (wireless client events), system (configuration and audit-style
 events), nac (Mist NAC authentications) or wan (clients of WAN edges).
+Without --source, the filters decide: --username searches NAC events;
+--client, --ssid, --band or --reason search wireless client events; anything
+else, --device included, searches device events. Pass --source for the other
+cases, such as the client events of one AP (--source client --device AP) or
+the NAC events of one client.
 --limit caps the number of events shown (default 1000, the newest ones);
 pass --limit 0 for all of them.
 
@@ -305,7 +310,8 @@ until --limit matching events are found.
 		examples: []string{
 			"get events --site HQ",
 			"get events -A --device sw-core --type SW_PORT_DOWN --duration 7d",
-			"get events --source client --site HQ --client aa:bb:cc:dd:ee:ff --band 5",
+			"get events --site HQ --client aa:bb:cc:dd:ee:ff --band 5",
+			"get events --source client --site HQ --device ap-lobby-01",
 			"get events --source client -A --type CLIENT_DEAUTHENTICATED --reason 15",
 			"get events --source nac --client aa:bb:cc:dd:ee:ff --type NAC_CLIENT_DENY",
 			"get events --source wan -A --duration 4h",
