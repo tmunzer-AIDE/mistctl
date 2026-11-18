@@ -89,6 +89,9 @@ type resource struct {
 	// SortDesc sorts the table by this numeric field, newest first, instead
 	// of by the first column (used for time-ordered resources).
 	SortDesc string
+	// SortAsc sorts the table by this numeric field, smallest first (e.g.
+	// the evaluation order of NAC rules).
+	SortAsc string
 	// DefaultLimit is the default of --limit (0 = all).
 	DefaultLimit int
 	// FlagValues lists the accepted values of enum flags, for completion.
@@ -189,7 +192,7 @@ func init() {
 		networksResource(), servicesResource(), evpnTopologiesResource(),
 		mapsResource(), mapstacksResource(),
 		orgSettingsResource(), siteSettingsResource(), deviceProfilesResource(), siteGroupsResource(),
-		alarmTemplatesResource(), webhooksResource(), licensesResource(),
+		alarmTemplatesResource(), webhooksResource(), nacRulesResource(), licensesResource(),
 		// monitoring
 		alarmsResource(), eventsResource(), slesResource(), rrmResource(), rrmEventsResource(),
 		alarmDefinitionsResource(), eventDefinitionsResource(), webhookDeliveriesResource(),

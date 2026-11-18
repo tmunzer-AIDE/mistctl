@@ -121,6 +121,7 @@ mistctl get rrm --site HQ --band 5
 | `deviceprofiles` | `profiles` | org | `/orgs/{id}/deviceprofiles` (one call per type, or `--type`) |
 | `sitegroups` | | org | `/orgs/{id}/sitegroups` (describe lists the sites) |
 | `licenses` | `subscriptions`, `lic` | org or site | `/orgs/{id}/licenses` (one row per license type: entitled, used, available; `-o wide` adds fully loaded, active subscriptions, next expiry), with a site `/sites/{id}/licenses/usages` (site usage next to the org entitlement) |
+| `nac-rules` | `nacrules` | org | `/orgs/{id}/nacrules` in evaluation order, NAC tags by name from `/orgs/{id}/nactags`; `describe nac-rule` resolves every referenced tag (what it matches or assigns) |
 | `alarmtemplates` | | org | `/orgs/{id}/alarmtemplates` |
 | `webhooks` | `wh` | org or site | `/orgs/{id}/webhooks`, `/sites/{id}/webhooks`; secrets and headers are redacted |
 | `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration` or `--start`/`--end`, `--sort`, `--group`, `--severity`, `--type`, `--acked`, `--ack-admin`, `--status`. `describe alarm ID` finds the alarm in a time window (`--duration`, default 7d) and adds its definition, the current state of the affected devices, their events around the alarm, the email recipients of the alarm template, the webhooks on the `alarms` topic and the 30-day count of that alarm type (8 to 11 API calls; `--with audit` adds the config changes of the hour before) |

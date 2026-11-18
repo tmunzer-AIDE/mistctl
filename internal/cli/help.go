@@ -152,7 +152,8 @@ does not set it.`,
 		short: "Mist NAC clients: authentication result, NAC rule, VLAN",
 		about: `Searches the clients that authenticated through Mist NAC during --duration
 (default 1d), newest first. Every filter is applied by the API. Use
-` + "`get events --source nac`" + ` for the authentication events of a client.`,
+` + "`get events --source nac`" + ` for the authentication events of a client, and
+` + "`describe nac-rule NAME`" + ` for the rule it matched.`,
 		examples: []string{
 			"get nac-clients",
 			"get nac-clients --status denied --duration 7d",
@@ -181,14 +182,30 @@ SUB-SW6, ...) from the org license summary: ENTITLED, USED and AVAILABLE
 on), the number of active SUBSCRIPTIONS and the NEXT-EXPIRY date.
 
 With a site, shows the licenses the site uses (SITE-USAGE) next to the org
-entitlement and consumption. One API call either way. The rows are built by mistctl: -o json
-and -o yaml print them, not the API answer.`,
+entitlement and consumption (ORG-ENTITLED, ORG-USED). One API call either
+way. The rows are built by mistctl: -o json and -o yaml print them, not the
+API answer.`,
 		examples: []string{
 			"get licenses",
 			"get licenses -o wide",
 			"get licenses --site HQ",
 			"get license SUB-MAN -o yaml",
 		},
+	},
+	"nac-rules": {
+		group: "config", title: "NAC rule",
+		about: `Lists the Mist NAC rules in evaluation order (ORDER, smallest first; the
+first enabled rule that matches decides). MATCH-TAGS and APPLY-TAGS show the
+NAC tags by name, and MATCH the other criteria (auth type, port types, number
+of sites or site groups...). Two API calls: the rules and the NAC tags.
+NAC-RULE in ` + "`get nac-clients`" + ` names the rule a client matched.`,
+		examples: []string{
+			"get nac-rules",
+			"get nac-rules -o wide",
+			"get nac-rule Corp-EAP-TLS -o yaml",
+		},
+		describe:         "Prints the rule's match and not-match conditions and its action, with every referenced NAC tag resolved: its name and what it matches or assigns (VLAN, RADIUS group, session timeout...). The document holds the rule and those tags. NAME is the rule name or ID. Two API calls.",
+		describeExamples: []string{"describe nac-rule Corp-EAP-TLS", "describe nac-rule Corp-EAP-TLS -o yaml"},
 	},
 	"alarmtemplates": {
 		group: "config", title: "alarm template",
