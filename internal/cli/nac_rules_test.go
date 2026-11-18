@@ -37,6 +37,10 @@ func TestNacRules(t *testing.T) {
 		t.Fatalf("expected one NAC tag call, got %d", n)
 	}
 
+	if out := run(t, "get", "nac-rules", "-o", "name"); strings.TrimSpace(out) != "Block\nWi-Fi TLS\nDefault-Wired" {
+		t.Fatalf("-o name not in evaluation order:\n%s", out)
+	}
+
 	out = run(t, "describe", "nac-rule", "Wi-Fi TLS")
 	for _, want := range []string{
 		"Match tags:", "mdm.compliant (match mdm_status = compliant)",

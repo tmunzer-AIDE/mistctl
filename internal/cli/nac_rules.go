@@ -54,7 +54,14 @@ func nacRulesResource() *resource {
 			return items
 		},
 		List: func(ctx context.Context, a *app, o *listOpts) ([]json.RawMessage, error) {
-			return listNacRules(ctx, a, o.limit)
+			// Fetch all, then sort, so every output (yaml, name) and --limit
+			// follow the evaluation order.
+			items, err := listNacRules(ctx, a, 0)
+			if err != nil {
+				return nil, err
+			}
+			sortAsc(items, "order")
+			return items, nil
 		},
 		Describe: describeNacRule,
 	}
