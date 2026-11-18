@@ -90,6 +90,7 @@ mistctl get rrm --site HQ --band 5
 | --- | --- |
 | `get RESOURCE [NAME...]` | List resources as a table, or `-o wide/json/yaml/name` |
 | `describe RESOURCE NAME` | Summary plus full config and status of one object |
+| `troubleshoot client MAC`, `troubleshoot device NAME`, `troubleshoot site [NAME] --type wireless\|wired\|wan` | What Marvis found (reason, explanation, recommendation) over `--duration` or `--start`/`--end`, within the last 7 days; `GET /orgs/{id}/troubleshoot`, needs a Marvis subscription |
 | `attach DEVICE` | Interactive remote shell on a switch or gateway |
 | `whoami` | Identity, cloud and privileges of the current token |
 | `usage` (alias `ratelimit`) | API calls used / remaining in the current hourly window |

@@ -125,6 +125,7 @@ Get started:
 	root.AddCommand(
 		newGetCmd(a),
 		newDescribeCmd(a),
+		newTroubleshootCmd(a),
 		newAttachCmd(a),
 		newWhoamiCmd(a),
 		newUsageCmd(a),
