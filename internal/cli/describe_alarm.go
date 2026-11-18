@@ -263,6 +263,12 @@ func describeAlarm(ctx context.Context, a *app, id string) (*described, error) {
 		}
 	}
 
+	if len(macs) == 0 {
+		// same document shape for an alarm that names no device
+		s.addList("devices", nil)
+		s.addList("events", nil)
+	}
+
 	// 4. device events around the alarm
 	var events []json.RawMessage
 	var evStart, evEnd int64
@@ -338,6 +344,9 @@ func describeAlarm(ctx context.Context, a *app, id string) (*described, error) {
 			_ = json.Unmarshal(r.Body, &body)
 			audit = body.Results
 			s.addList("audit", audit)
+			if len(audit) == 0 {
+				s.header = append(s.header, [2]string{"Audit", "no configuration change logged in the hour before the alarm"})
+			}
 		}
 	}
 

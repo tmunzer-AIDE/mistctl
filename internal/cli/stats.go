@@ -81,7 +81,7 @@ func mxedgesResource() *resource {
 		Name: "mxedges", Singular: "mxedge", Aliases: []string{"mistedges", "mistedge", "me"},
 		Short:    "Mist Edges with their live status (also in `get devices`)",
 		Scope:    "org/site",
-		Endpoint: "GET /api/v1/orgs/{org_id}/stats/mxedges, GET /api/v1/sites/{site_id}/stats/mxedges, GET /api/v1/orgs/{org_id}/mxedges, GET /api/v1/orgs/{org_id}/mxedges/{mxedge_id}, GET /api/v1/orgs/{org_id}/stats/mxedges/{mxedge_id}",
+		Endpoint: "GET /api/v1/orgs/{org_id}/stats/mxedges, GET /api/v1/sites/{site_id}/stats/mxedges, GET /api/v1/orgs/{org_id}/mxedges, GET /api/v1/orgs/{org_id}/mxedges/{mxedge_id}, GET /api/v1/orgs/{org_id}/stats/mxedges/{mxedge_id}, GET /api/v1/sites/{site_id}/mxedges/{mxedge_id}, GET /api/v1/sites/{site_id}/stats/mxedges/{mxedge_id}",
 		Columns:  mxedgeColumns,
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.status, "status", "", "filter by status: connected, disconnected")
@@ -131,21 +131,28 @@ func describeMxedge(ctx context.Context, a *app, name string) (*described, error
 	}
 	// The org list (for_site=any) returns org-level and site-assigned
 	// edges alike; the listed item tells which one this is.
-	siteEdge := output.Text(listed["for_site"]) == "true" || output.Text(listed["site_id"]) != ""
+	// An org-level edge carries the nil UUID as site_id.
+	site, siteEdge := client.ParseUUID(output.Text(listed["site_id"]))
+	siteEdge = siteEdge && site != uuid.Nil
+	// The org endpoints answer 404 for an edge assigned to a site (seen on
+	// a live org): its configuration and stats are read from the site.
 	cfg, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.Mxedge], error) {
+		if siteEdge {
+			// the SDK returns the bare HTTP response for this call; the
+			// body is captured by the transport either way
+			_, err := cl.SDK.SitesMxEdges().GetSiteMxEdge(ctx, site, id)
+			return models.ApiResponse[models.Mxedge]{}, err
+		}
 		return cl.SDK.OrgsMxEdges().GetOrgMxEdge(ctx, org, id)
 	})
 	if err != nil {
 		return nil, err
 	}
 	stats, serr := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.StatsMxedge], error) {
-		// for_site defaults to false on this endpoint: ask for the
-		// site-level edge explicitly, or its stats are not found.
-		var forSite *bool
 		if siteEdge {
-			forSite = client.Ptr(true)
+			return cl.SDK.SitesStatsMxEdges().GetSiteMxEdgeStats(ctx, site, id, nil, nil, nil)
 		}
-		return cl.SDK.OrgsStatsMxEdges().GetOrgMxEdgeStats(ctx, org, id, forSite)
+		return cl.SDK.OrgsStatsMxEdges().GetOrgMxEdgeStats(ctx, org, id, nil)
 	})
 	c, s := output.Decode(cfg.Body), map[string]any{}
 	if serr == nil {
@@ -170,8 +177,8 @@ func describeMxedge(ctx context.Context, a *app, name string) (*described, error
 		scope = "site-level"
 	}
 	header = append(header, [2]string{"Scope", scope})
-	if site := pick("site_id"); site != "" {
-		header = append(header, [2]string{"Site", siteLabel(a.siteNames(ctx), site)})
+	if siteEdge {
+		header = append(header, [2]string{"Site", siteLabel(a.siteNames(ctx), site.String())})
 	}
 	header = append(header,
 		[2]string{"Status", output.Text(s["status"])},

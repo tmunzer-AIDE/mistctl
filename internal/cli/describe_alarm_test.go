@@ -106,6 +106,13 @@ func TestDescribeAlarmOrgLevel(t *testing.T) {
 	out := run(t, "describe", "alarm", orgAlarmID)
 	assertContains(t, out, "cert_expiry (Certificate expiring)", "org-level alarm", "2 cert_expiry alarms in the org in 30d",
 		"no alarm template applies", "splunk-alarms (org)")
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(run(t, "describe", "alarm", orgAlarmID, "-o", "json")), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if string(doc["devices"]) != "[]" || string(doc["events"]) != "[]" {
+		t.Errorf("an alarm without devices should keep empty devices and events lists: %s %s", doc["devices"], doc["events"])
+	}
 	for _, p := range []string{"/api/v1/sites/" + siteHQ + "/webhooks", "/api/v1/sites/" + siteHQ + "/stats/devices", "/api/v1/sites/" + siteHQ + "/devices/events/search"} {
 		if c := f.called(p); len(c) != 0 {
 			t.Errorf("site call for an org-level alarm: %v", c)
@@ -151,37 +158,36 @@ func TestDescribeMxedgeScopes(t *testing.T) {
 				http.Error(w, `{"detail":"expected for_site=any"}`, 400)
 				return
 			}
-			fmt.Fprintf(w, `[{"id":"%s","name":"edge-01","mac":"020000000001"},
+			fmt.Fprintf(w, `[{"id":"%s","name":"edge-01","mac":"020000000001","for_site":false,"site_id":"00000000-0000-0000-0000-000000000000"},
 				{"id":"%s","name":"edge-site","mac":"020000000002","for_site":true,"site_id":"%s"}]`, edgeID, siteEdgeID, siteHQ)
 		},
-		org + "/mxedges/" + edgeID:     body(fmt.Sprintf(`{"id":"%s","name":"edge-01","mac":"020000000001"}`, edgeID)),
-		org + "/mxedges/" + siteEdgeID: body(fmt.Sprintf(`{"id":"%s","name":"edge-site","mac":"020000000002","for_site":true,"site_id":"%s"}`, siteEdgeID, siteHQ)),
+		org + "/mxedges/" + edgeID: body(fmt.Sprintf(`{"id":"%s","name":"edge-01","mac":"020000000001"}`, edgeID)),
+		// as on a live org: the org endpoints do not know a site-assigned edge
+		org + "/mxedges/" + siteEdgeID:                             func(w http.ResponseWriter, r *http.Request) { http.Error(w, `{"detail":"resource not found"}`, 404) },
+		org + "/stats/mxedges/" + siteEdgeID:                       func(w http.ResponseWriter, r *http.Request) { http.Error(w, `{"detail":"resource not found"}`, 404) },
+		"/api/v1/sites/" + siteHQ + "/mxedges/" + siteEdgeID:       body(fmt.Sprintf(`{"id":"%s","name":"edge-site","mac":"020000000002","for_site":true,"site_id":"%s"}`, siteEdgeID, siteHQ)),
+		"/api/v1/sites/" + siteHQ + "/stats/mxedges/" + siteEdgeID: body(`{"status":"connected","ip_stat":{"ip":"10.8.8.8"}}`),
+		org + "/mxedges/" + edgeID:                                 body(fmt.Sprintf(`{"id":"%s","name":"edge-01","mac":"020000000001","for_site":false,"site_id":"00000000-0000-0000-0000-000000000000"}`, edgeID)),
 		org + "/stats/mxedges/" + edgeID: func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Query().Has("for_site") {
 				http.Error(w, `{"detail":"unexpected for_site"}`, 400)
 				return
 			}
-			fmt.Fprint(w, `{"status":"connected","ip_stat":{"ip":"10.9.9.9"}}`)
-		},
-		// like the documented API default: without for_site=true a
-		// site-level edge has no stats here
-		org + "/stats/mxedges/" + siteEdgeID: func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("for_site") != "true" {
-				http.Error(w, `{"detail":"not found"}`, 404)
-				return
-			}
-			fmt.Fprint(w, `{"status":"connected","ip_stat":{"ip":"10.8.8.8"}}`)
+			fmt.Fprint(w, `{"status":"connected","ip_stat":{"ip":"10.9.9.9"},"site_id":"00000000-0000-0000-0000-000000000000"}`)
 		},
 	})
-	assertContains(t, run(t, "describe", "mxedge", "edge-01"), "Scope:", "org-level", "10.9.9.9")
+	out := run(t, "describe", "mxedge", "edge-01")
+	assertContains(t, out, "Scope:", "org-level", "Status:", "connected", "10.9.9.9")
+	// the nil UUID of an org-level edge is not a site
+	assertNotContains(t, out, "Site:", "site-level", "not found")
 	f.reset()
-	out := run(t, "describe", "mxedge", "edge-site")
+	out = run(t, "describe", "mxedge", "edge-site")
 	assertContains(t, out, "Scope:", "site-level", "Site:", "HQ", "Status:", "connected", "10.8.8.8")
 	// still three Mist Edge calls (list, config, stats); the site name
 	// comes from the cached site index
-	n := len(f.called("/api/v1/orgs/"+orgID+"/mxedges")) + len(f.called("/api/v1/orgs/"+orgID+"/stats/mxedges"))
-	if n != 3 || len(f.called("/api/v1/sites/")) != 0 {
-		t.Errorf("describe mxedge should take 3 Mist Edge calls and no site call, got %d", n)
+	n := len(f.called("/api/v1/orgs/"+orgID+"/mxedges")) + len(f.called("/api/v1/sites/"+siteHQ+"/"))
+	if n != 3 || len(f.called("/api/v1/orgs/"+orgID+"/stats/mxedges")) != 0 {
+		t.Errorf("describe mxedge should take 3 Mist Edge calls (org list, site config, site stats), got %d: %v", n, f.called("/api/v1/"))
 	}
 	assertContains(t, run(t, "describe", "device", "02:00:00:00:00:02"), "site-level", "edge-site")
 }
