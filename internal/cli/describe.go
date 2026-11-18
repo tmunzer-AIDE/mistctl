@@ -67,6 +67,11 @@ be described; use ` + "`mistctl get RESOURCE -o yaml`" + ` to see all their fiel
 			ValidArgsFunction: a.completeNames(r),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				a.describeOpts = o
+				// A bad time window fails before any API call, instead of
+				// silently leaving out the sections that read it.
+				if err := o.checkWindow(); err != nil {
+					return err
+				}
 				d, err := r.Describe(cmd.Context(), a, args[0])
 				if err != nil {
 					return err

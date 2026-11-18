@@ -40,6 +40,9 @@ type insightResult struct {
 	interval string // as requested ("" when the metric takes none)
 	raw      json.RawMessage
 	err      error
+	// incomplete says why only part of a paged series was read ("" when
+	// the whole window was).
+	incomplete string
 
 	start, step int64
 	times       []int64

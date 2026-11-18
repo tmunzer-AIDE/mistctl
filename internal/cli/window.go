@@ -155,6 +155,14 @@ func (o *listOpts) checkWindow() error {
 			return fmt.Errorf("--end: %w", err)
 		}
 	}
+	// The complete window, so an empty one (--start at or after --end) is
+	// refused too. Without a --duration, --start or --end alone is left to
+	// the command, which may not use a window at all.
+	if (o.start != "" || o.end != "") && (o.duration != "" || (o.start != "" && o.end != "")) {
+		if _, err := o.window(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
