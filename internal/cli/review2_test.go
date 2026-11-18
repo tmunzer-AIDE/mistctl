@@ -82,7 +82,7 @@ func TestDurationCheckedFirst(t *testing.T) {
 	fake := setupMore(t)
 	for _, d := range []string{"5x", "30000000000w", "99999999999999999999d", "4000d4000d"} {
 		fake.reset()
-		_, err := runErr("get", "events", "--duration", d)
+		_, err := runErr("get", "events", "--source", "device", "--duration", d)
 		if err == nil || !strings.Contains(err.Error(), "--duration") {
 			t.Errorf("--duration %s: %v", d, err)
 		}
@@ -90,7 +90,7 @@ func TestDurationCheckedFirst(t *testing.T) {
 			t.Errorf("--duration %s: API called before validation: %v", d, c)
 		}
 	}
-	if _, err := runErr("get", "events", "--start", "yesterday-ish"); err == nil || len(fake.called("/")) > 0 {
+	if _, err := runErr("get", "events", "--source", "device", "--start", "yesterday-ish"); err == nil || len(fake.called("/")) > 0 {
 		t.Errorf("--start not validated first: %v %v", err, fake.called("/"))
 	}
 	if _, err := parseMistDuration("520w"); err != nil {
@@ -112,7 +112,7 @@ func TestNameIsNotCutByLimit(t *testing.T) {
 
 func TestSearchNameNotFoundMentionsLimit(t *testing.T) {
 	setupMore(t)
-	_, err := runErr("get", "events", "NO_SUCH_EVENT", "--limit", "1")
+	_, err := runErr("get", "events", "--source", "device", "NO_SUCH_EVENT", "--limit", "1")
 	if err == nil || !strings.Contains(err.Error(), "raise --limit") {
 		t.Errorf("expected a hint about --limit, got %v", err)
 	}
@@ -152,12 +152,12 @@ func TestAmbiguousDeviceUsesSite(t *testing.T) {
 			{"id":"00000000-0000-0000-1000-5c5b3500000b","name":"sw-01","mac":"5c5b3500000b","site_id":"` + siteLab + `","type":"switch"}]`),
 		"/api/v1/sites/" + siteLab + "/devices/events/search": body(`{"results":[]}`),
 	})
-	run(t, "get", "events", "--device", "sw-01", "--site", "Lab")
+	run(t, "get", "events", "--source", "device", "--device", "sw-01", "--site", "Lab")
 	c := f.called("/api/v1/sites/" + siteLab + "/devices/events/search")
 	if len(c) != 1 || !strings.Contains(c[0], "mac=5c5b3500000b") {
 		t.Errorf("expected the Lab device, got %v", c)
 	}
-	if _, err := runErr("get", "events", "--device", "sw-01", "-A"); err == nil || !strings.Contains(err.Error(), "matches 2") {
+	if _, err := runErr("get", "events", "--source", "device", "--device", "sw-01", "-A"); err == nil || !strings.Contains(err.Error(), "matches 2") {
 		t.Errorf("without a site the name is ambiguous: %v", err)
 	}
 }

@@ -78,7 +78,7 @@ mistctl describe device ap-lobby
 mistctl describe client aa:bb:cc:dd:ee:ff -o json
 mistctl get wlans --site HQ
 mistctl get alarms --group infra --severity critical --duration 7d
-mistctl get events --device sw-core --type SW_PORT_DOWN
+mistctl get events --source device --device sw-core --type SW_PORT_DOWN
 mistctl get sles --sle wired
 mistctl get ports --device sw-core --status down
 mistctl get rrm --site HQ --band 5
@@ -121,14 +121,15 @@ mistctl get rrm --site HQ --band 5
 | `sitegroups` | | org | `/orgs/{id}/sitegroups` (describe lists the sites) |
 | `alarmtemplates` | | org | `/orgs/{id}/alarmtemplates` |
 | `webhooks` | `wh` | org or site | `/orgs/{id}/webhooks`, `/sites/{id}/webhooks`; secrets and headers are redacted |
-| `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration` or `--start`/`--end`, `--sort`, `--group`, `--severity`, `--type`, `--acked`, `--ack-admin`, `--status` |
-| `events` | `ev` | org or site | device, client, system, NAC or WAN client event searches (`--source`), with `--duration` or `--start`/`--end`, `--sort`, `--type`, `--device`, `--client`, `--text`, `--ssid`, `--band`, `--reason`, `--username` |
+| `alarms` | `al` | org or site | `/orgs/{id}/alarms/search` with `--duration` or `--start`/`--end`, `--sort`, `--group`, `--severity`, `--type`, `--acked`, `--ack-admin`, `--status`. `describe alarm ID` finds the alarm in a time window (`--duration`, default 7d) and adds its definition, the current state of the affected devices, their events around the alarm, the email recipients of the alarm template, the webhooks on the `alarms` topic and the 30-day count of that alarm type (8 to 11 API calls; `--with audit` adds the config changes of the hour before) |
+| `events` | `ev` | org or site | device, client, system, NAC or WAN client event searches (`--source`, required), with `--duration` or `--start`/`--end`, `--sort`, `--type`, `--device`, `--client`, `--text`, `--ssid`, `--band`, `--reason`, `--username` |
 | `alarm-definitions`, `event-definitions` | `alarmdefs`, `eventdefs` | token | `/const/alarm_defs`, `/const/{device,client,system,nac,mxedge}_events`; they also feed `--type` completion of alarms and events |
+| `audit-logs` | `audit`, `logs` | org or site | `/orgs/{id}/logs/search` with `--duration` or `--start`/`--end`, `--sort`, `--admin`, `--text`; with a site, `site_id` is sent |
 | `config-history` | | site | `/sites/{id}/devices/config_history/search` (AP configurations pushed over `--duration` or `--start`/`--end`: version, SSIDs, channels); `--device` (filtered locally too; its site is used without `--site`), `--sort` |
 | `webhook-deliveries` | `deliveries` | org | `/orgs/{id}/webhooks/{id}/events/search` with `--webhook`, `--status`, `--topic` |
 | `sles` | | org or site | `/orgs/{id}/insights/sites-sle` (`--sle wifi\|wired\|wan`), one row per site |
 | `rrm`, `rrm-events` | `channels` | site | `/sites/{id}/rrm/current` (one row per band: APs per channel/power, noise, neighbors; `-o wide` adds the RF template limits, `-o json` keeps any per-AP plan under `aps`), `/sites/{id}/rrm/events` |
-| `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`) |
+| `mxedges` | `mistedges`, `me` | org or site | `/orgs/{id}/stats/mxedges`, `/sites/{id}/stats/mxedges` (also listed by `get devices`); `describe mxedge` finds org-level and site-assigned Mist Edges and shows which one it is (`Scope`) |
 | `bgp-peers`, `ospf-peers` | `bgp`, `ospf` | org or site | `/stats/bgp_peers/search`, `/stats/ospf_peers/search` with `--device`, `--vrf`, `--up`, `--neighbor`/`--peer`, `--start`/`--end` |
 | `ports` | `interfaces` | org or site | `/stats/ports/search` with `--device`, `--type`, `--status up\|down`, `--port`, `--neighbor`, `--speed`, `--poe`, `--auth-state`, `--stp-state`; `describe port DEVICE:PORT` (or `PORT --device X`) shows every stat of one port, breakout ports included (`sw-core:et-0/0/48:0`) |
 | `zones` | | site | `/sites/{id}/stats/zones` |

@@ -34,7 +34,7 @@ NAME filters the list (name, ID or MAC address, depending on the resource).`,
   mistctl get device ap-lobby-01
   mistctl get wlans --site HQ
   mistctl get alarms --group infra --severity critical --duration 7d
-  mistctl get events --device sw-core --type SW_PORT_DOWN
+  mistctl get events --source device --device sw-core --type SW_PORT_DOWN
   mistctl get ports --device sw-core --status down
   mistctl get inventory --state unassigned
   mistctl get nac-clients --status denied --duration 7d`,

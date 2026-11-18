@@ -254,15 +254,15 @@ func TestAlarms(t *testing.T) {
 	if _, err := runErr("get", "alarms", "--severity", "fatal"); err == nil {
 		t.Error("expected invalid --severity error")
 	}
-	if _, err := runErr("describe", "alarm", "a1"); err == nil {
-		t.Error("alarms should have no describe")
+	if _, err := runErr("describe", "event", "a1"); err == nil {
+		t.Error("events should have no describe")
 	}
 	assertContains(t, run(t, "__complete", "get", "alarms", "--group", ""), "infrastructure", "marvis")
 }
 
 func TestEvents(t *testing.T) {
 	fake := setupMore(t)
-	out := run(t, "get", "events", "--device", "ap-lobby")
+	out := run(t, "get", "events", "--source", "device", "--device", "ap-lobby")
 	assertContains(t, out, "AP_DISCONNECTED", "ap-lobby", "lost heartbeat", "HQ")
 	c := fake.called("/api/v1/orgs/" + orgID + "/devices/events/search")
 	if len(c) != 1 || !strings.Contains(c[0], "mac=5c5b35000001") || !strings.Contains(c[0], "limit=1000") {
@@ -374,7 +374,7 @@ func TestAPIResourcesListsNewResources(t *testing.T) {
 func TestNewResourcesAreGetOnly(t *testing.T) {
 	fake := setupMore(t)
 	for _, args := range [][]string{
-		{"get", "wlans"}, {"get", "alarms"}, {"get", "events"}, {"get", "sles"}, {"get", "ports", "--site", "HQ"},
+		{"get", "wlans"}, {"get", "alarms"}, {"get", "events", "--source", "device"}, {"get", "sles"}, {"get", "ports", "--site", "HQ"},
 		{"describe", "wlantemplate", "Campus"}, {"describe", "mxedge", "edge-01"},
 	} {
 		run(t, args...)
@@ -402,7 +402,9 @@ func TestHelpTexts(t *testing.T) {
 	}
 	out := run(t, "get", "-h")
 	assertContains(t, out, "Inventory:", "Configuration:", "Monitoring:", "Live stats:")
-	assertNotContains(t, run(t, "describe", "-h"), "Monitoring:", "Describe a ")
+	assertNotContains(t, run(t, "describe", "-h"), "Describe a ")
+	assertContains(t, run(t, "describe", "-h"), "Monitoring:")
+	assertContains(t, run(t, "describe", "alarm", "-h"), "--with", "--duration", "API calls")
 	assertContains(t, run(t, "describe", "port", "-h"), "[DEVICE:]PORT")
 	// NAME can match derived fields such as the device name
 	assertContains(t, run(t, "get", "ports", "sw-core", "--site", "HQ"), "ge-0/0/1", "ge-0/0/2")

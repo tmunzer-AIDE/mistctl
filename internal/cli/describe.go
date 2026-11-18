@@ -17,17 +17,18 @@ and status in YAML. With -o json or -o yaml only the full document is printed.
 
 NAME is a name or an ID. Devices and Mist Edges also accept a MAC address,
 WLANs their SSID, and ports DEVICE:PORT. Clients are identified by their MAC
-address only.
+address only, alarms by their ID.
 Each resource has its own help: mistctl describe RESOURCE -h
 
-Resources that are searches (alarms, events, SLEs, RRM, BGP and OSPF peers)
-cannot be described; use ` + "`mistctl get RESOURCE -o yaml`" + ` to see all their fields.`,
+Resources that are searches (events, SLEs, RRM, BGP and OSPF peers) cannot
+be described; use ` + "`mistctl get RESOURCE -o yaml`" + ` to see all their fields.`,
 		Example: `  mistctl describe site HQ
   mistctl describe device ap-lobby-01
   mistctl describe device 5c:5b:35:00:11:22 -o json
   mistctl describe client aa:bb:cc:dd:ee:ff
   mistctl describe wlan Corp --site HQ
-  mistctl describe port sw-core:ge-0/0/1`,
+  mistctl describe port sw-core:ge-0/0/1
+  mistctl describe alarm 7f1c0d9e-3a52-4c1b-9d0e-5b6a7c8d9e0f`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				if r, err := findResource(args[0]); err == nil && r.Describe == nil {
@@ -48,7 +49,7 @@ cannot be described; use ` + "`mistctl get RESOURCE -o yaml`" + ` to see all the
 	for _, r := range registry {
 		r := r
 		if r.Describe == nil {
-			continue // list-only resource (alarms, events, stats searches)
+			continue // list-only resource (events, stats searches)
 		}
 		o := &listOpts{}
 		arg := r.DescribeArg
@@ -77,6 +78,16 @@ cannot be described; use ` + "`mistctl get RESOURCE -o yaml`" + ` to see all the
 				if len(d.Header) > 0 {
 					output.KV(a.out, d.Header)
 					fmt.Fprintln(a.out)
+				}
+				for _, t := range d.Tables {
+					fmt.Fprintln(a.out, t.Title+":")
+					if err := (output.Printer{Format: a.output}).PrintList(a.out, t.Rows, t.Cols); err != nil {
+						return err
+					}
+					fmt.Fprintln(a.out)
+				}
+				if len(d.Primary) > 0 {
+					return output.WriteYAML(a.out, d.Primary)
 				}
 				return output.WriteYAML(a.out, d.Doc)
 			},
