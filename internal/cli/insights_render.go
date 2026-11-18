@@ -161,8 +161,12 @@ func parseInsight(metric string, def *metricDef, raw json.RawMessage) (*insightR
 	return res, nil
 }
 
-// isSeries reports whether an array holds only scalars (and nulls).
+// isSeries reports whether an array holds only scalars (and nulls). An
+// empty array is no data, not a series.
 func isSeries(a []any) bool {
+	if len(a) == 0 {
+		return false
+	}
 	for _, e := range a {
 		switch e.(type) {
 		case nil, json.Number, string, bool:

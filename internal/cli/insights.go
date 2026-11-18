@@ -300,6 +300,7 @@ func runInsights(ctx context.Context, a *app, o *insightOpts, kind, name string,
 			fmt.Fprintf(a.out, "%s, %s to %s\n\n", output.Safe(tgt.label), localTime(start), localTime(end))
 		}
 		view := insightView{noHeaders: a.noHeaders, noTrend: o.noTrend, points: o.points, limit: o.limit}
+		nameInsightRows(ctx, a, tgt, results)
 		if err := printInsights(a.out, results, view); err != nil {
 			return err
 		}
@@ -313,6 +314,56 @@ func runInsights(ctx context.Context, a *app, o *insightOpts, kind, name string,
 		return fmt.Errorf("%d of %d metrics could not be read", failed, len(results))
 	}
 	return nil
+}
+
+// nameInsightRows makes top N rows readable: a row that points at a device
+// of the inventory (ap_id, device_id or mac) gets its name, and the site
+// column is dropped when it only repeats the site of the query.
+func nameInsightRows(ctx context.Context, a *app, t *insightTarget, results []*insightResult) {
+	var byID, byMAC map[string]string
+	load := func() {
+		if byID != nil {
+			return
+		}
+		byID, byMAC = map[string]string{}, map[string]string{}
+		entries, err := a.index(ctx, kindDevices, true)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if e.Name != "" {
+				byID[strings.ToLower(e.ID)] = e.Name
+				if e.MAC != "" {
+					byMAC[e.MAC] = e.Name
+				}
+			}
+		}
+	}
+	for _, r := range results {
+		for _, row := range r.rows {
+			if s, ok := row["site"].(string); ok && strings.EqualFold(s, t.site.String()) {
+				delete(row, "site")
+			}
+			if _, named := row["name"]; named {
+				continue
+			}
+			for _, k := range []string{"ap_id", "device_id", "mac"} {
+				v, ok := row[k].(string)
+				if !ok || v == "" {
+					continue
+				}
+				load()
+				name := byID[strings.ToLower(v)]
+				if name == "" {
+					name = byMAC[cache.NormalizeMAC(v)]
+				}
+				if name != "" {
+					row["name"] = name
+					break
+				}
+			}
+		}
+	}
 }
 
 func localTime(epoch int64) string {

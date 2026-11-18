@@ -33,11 +33,13 @@ func setupInsights(t *testing.T) *routeMist {
 			{"app":"zoom","num_clients":2,"total_bytes":24118646,"services":["any"]},
 			{"app":"Unknown","num_clients":1,"total_bytes":86564670},
 			{"app":"dns","num_clients":4,"total_bytes":1200}]}`),
-		insightsHQ + "client/aabbccddeeff/rssi":     series(`"avg_rssi":[-60,-61,-62]`),
-		insightsHQ + "client/aabbccddeeff/rx_bytes": series(`"results":[10,20,30]`),
-		insightsHQ + "client/aabbccddeeff/tx_bytes": series(`"results":[1,2,3]`),
-		insightsHQ + "switch/5c5b35000002/cpu":      series(`"avg_cpu":[4.95,4.9,4.67],"max_cpu":[7,7,6]`),
-		insightsHQ + "switch/5c5b35000002/rx_bytes": series(`"results":[490396224,137641648,25359286]`),
+		insightsHQ + "top-ap-by-bytes":                   body(`{"start":1,"end":2,"results":[{"ap_id":"` + apID + `","site":"` + siteHQ + `","total_bytes":1456963098}]}`),
+		insightsHQ + "switch/5c5b35000002/optic-metrics": series(`"results":[]`),
+		insightsHQ + "client/aabbccddeeff/rssi":          series(`"avg_rssi":[-60,-61,-62]`),
+		insightsHQ + "client/aabbccddeeff/rx_bytes":      series(`"results":[10,20,30]`),
+		insightsHQ + "client/aabbccddeeff/tx_bytes":      series(`"results":[1,2,3]`),
+		insightsHQ + "switch/5c5b35000002/cpu":           series(`"avg_cpu":[4.95,4.9,4.67],"max_cpu":[7,7,6]`),
+		insightsHQ + "switch/5c5b35000002/rx_bytes":      series(`"results":[490396224,137641648,25359286]`),
 		insightsHQ + "switch/5c5b35000002/port-metrics": func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Query().Get("port_id") == "" {
 				http.Error(w, `{"detail":"port_id is required"}`, 400)
@@ -258,6 +260,17 @@ func TestInsightsPointsRowsAndJSON(t *testing.T) {
 	assertNotContains(t, out, "dns", "TREND")
 	if c := fake.called(insightsHQ + "top-app-by-bytes"); len(c) != 1 || !strings.Contains(c[0], "limit=2&") || strings.Contains(c[0], "interval=") {
 		t.Errorf("top N query: %v", c)
+	}
+
+	// a device in a top N gets its name, the query's own site is not repeated
+	out = run(t, "insights", "site", "top-ap-by-bytes", "--site", "HQ")
+	assertContains(t, out, "NAME", "ap-lobby", apID, "1.46 GB")
+	assertNotContains(t, out, "SITE", siteHQ)
+	// an empty answer says so, in both views
+	for _, extra := range [][]string{nil, {"--points"}} {
+		out = run(t, append([]string{"insights", "switch", "sw-core", "optic-metrics"}, extra...)...)
+		assertContains(t, out, "no data")
+		assertNotContains(t, out, "TIME")
 	}
 
 	out = run(t, "insights", "site", "num_clients", "rssi", "--site", "HQ", "-o", "json")
