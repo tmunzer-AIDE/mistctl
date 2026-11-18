@@ -89,13 +89,14 @@ func (c Column) Value(obj map[string]any) string {
 	return ""
 }
 
-// Text renders scalars and short lists.
+// Text renders scalars and short lists. Trailing NUL bytes, which some
+// clients report at the end of their hostname, are dropped.
 func Text(v any) string {
 	switch t := v.(type) {
 	case nil:
 		return ""
 	case string:
-		return t
+		return strings.TrimRight(t, "\x00")
 	case json.Number:
 		return t.String()
 	case bool:

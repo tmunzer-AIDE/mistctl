@@ -22,10 +22,19 @@ import (
 // the hostnames itself. The wireless search has a hostname parameter; the
 // wired search does not, so its free-text parameter is used (it also
 // matches MACs, IPs, ..., which the local comparison filters out).
+//
+// A hostname belongs to the client, not to how it connects (a wired record
+// of a client that is also wireless often has no hostname), so both
+// searches always run, whatever --type says; --type only selects the views
+// that describe prints.
 
 // hostnameMatch is one hostname of one client found by a hostname search.
+// current is false for a hostname the client had earlier in the window
+// (search records list every hostname seen; last_hostname is the current
+// one).
 type hostnameMatch struct {
 	mac, hostname, kind string
+	current             bool
 }
 
 const (
@@ -34,10 +43,9 @@ const (
 )
 
 // searchClientHostnames returns the hostnames starting with prefix (any
-// case) of the clients seen in the window, org-wide. kind is "all",
-// "wireless" or "wired". An empty prefix returns the hostnames of the most
-// recent clients.
-func searchClientHostnames(ctx context.Context, a *app, prefix, kind string, w window, limit int) ([]hostnameMatch, error) {
+// case) of the wireless and wired clients seen in the window, org-wide. An
+// empty prefix returns the hostnames of the most recent clients.
+func searchClientHostnames(ctx context.Context, a *app, prefix string, w window, limit int) ([]hostnameMatch, error) {
 	cl, err := a.client()
 	if err != nil {
 		return nil, err
@@ -65,15 +73,15 @@ func searchClientHostnames(ctx context.Context, a *app, prefix, kind string, w w
 			if mac == "" {
 				continue
 			}
-			for _, h := range clientHostnames(m) {
+			for i, h := range clientHostnames(m) {
 				if strings.HasPrefix(strings.ToLower(h), lp) {
-					out = append(out, hostnameMatch{mac: mac, hostname: h, kind: k})
+					out = append(out, hostnameMatch{mac: mac, hostname: h, kind: k, current: i == 0})
 				}
 			}
 		}
 		return nil
 	}
-	if kind != "wired" {
+	{
 		r, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.ResponseClientSearch], error) {
 			return cl.SDK.OrgsClientsWireless().SearchOrgWirelessClients(ctx, org, nil, nil, nil, nil, pat, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, nil)
 		})
@@ -84,7 +92,7 @@ func searchClientHostnames(ctx context.Context, a *app, prefix, kind string, w w
 			return nil, err
 		}
 	}
-	if kind != "wireless" {
+	{
 		r, err := client.Call(ctx, cl, func(ctx context.Context) (models.ApiResponse[models.SearchWiredClient], error) {
 			return cl.SDK.OrgsClientsWired().SearchOrgWiredClients(ctx, org, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, pat, nil, nil, nil, nil, nil, nil, &limit, w.start, w.end, nil, nil, nil)
 		})
@@ -98,9 +106,10 @@ func searchClientHostnames(ctx context.Context, a *app, prefix, kind string, w w
 	return out, nil
 }
 
-// clientHostnames returns the distinct hostnames of a client record
-// (search results hold lists, stats and wired records scalars). Some
-// devices report a hostname ending with NUL bytes; they are trimmed.
+// clientHostnames returns the distinct hostnames of a client record,
+// the current one first (search results hold lists, stats and wired records
+// scalars). Some devices report a hostname ending with NUL bytes; they are
+// trimmed.
 func clientHostnames(m map[string]any) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -127,9 +136,10 @@ func clientHostnames(m map[string]any) []string {
 
 // resolveClientHostname returns the MAC of the one client whose hostname is
 // name (any case). Several clients with that hostname is an error that
-// lists them, so the user can pick one by MAC.
-func resolveClientHostname(ctx context.Context, a *app, name, kind string, w window, dur string) (string, error) {
-	found, err := searchClientHostnames(ctx, a, name, kind, w, hostnameResolveLimit)
+// lists them, so the user can pick one by MAC. Each MAC is labelled with
+// the client types whose records carry that hostname.
+func resolveClientHostname(ctx context.Context, a *app, name string, w window, dur string) (string, error) {
+	found, err := searchClientHostnames(ctx, a, name, w, hostnameResolveLimit)
 	if err != nil {
 		return "", err
 	}
@@ -155,11 +165,7 @@ func resolveClientHostname(ctx context.Context, a *app, name, kind string, w win
 	case 1:
 		return macs[0], nil
 	case 0:
-		label := "client"
-		if kind != "all" {
-			label = kind + " client"
-		}
-		msg := fmt.Sprintf("no %s with hostname %q seen in the last %s (org-wide client search); NAME is a MAC address or a hostname", label, name, dur)
+		msg := fmt.Sprintf("no client with hostname %q seen in the last %s (org-wide client search); NAME is a MAC address or a hostname", name, dur)
 		if len(others) > 0 {
 			sort.Strings(others)
 			if len(others) > 5 {
@@ -176,17 +182,14 @@ func resolveClientHostname(ctx context.Context, a *app, name, kind string, w win
 	return "", fmt.Errorf("hostname %q matches %d clients seen in the last %s:\n%s\ndescribe one of them by MAC address", name, len(macs), dur, strings.Join(lines, "\n"))
 }
 
-// completeClientNames completes client hostnames from an org-wide search
-// over the command's --duration (default 7d), honoring --type. Each
-// hostname is offered once; its description is the client's MAC, or the
-// number of clients sharing it.
+// completeClientNames completes the current client hostnames from the
+// org-wide searches over the command's --duration (default 7d). Earlier
+// hostnames of a client are not offered: describe would not find them when
+// the search does not match them. Each hostname is offered once; its
+// description is the client's MAC, or the number of clients sharing it.
 func completeClientNames(a *app, cmd *cobra.Command, toComplete string) []string {
 	ctx, cancel := a.completionCtx(cmd)
 	defer cancel()
-	kind, _ := cmd.Flags().GetString("type")
-	if !contains(clientTypes, kind) {
-		kind = "all"
-	}
 	dur, _ := cmd.Flags().GetString("duration")
 	if dur == "" {
 		dur = "7d"
@@ -195,7 +198,7 @@ func completeClientNames(a *app, cmd *cobra.Command, toComplete string) []string
 	if err != nil {
 		return nil
 	}
-	found, err := searchClientHostnames(ctx, a, toComplete, kind, w, hostnameCompleteLimit)
+	found, err := searchClientHostnames(ctx, a, toComplete, w, hostnameCompleteLimit)
 	if err != nil {
 		return nil
 	}
@@ -207,6 +210,9 @@ func completeClientNames(a *app, cmd *cobra.Command, toComplete string) []string
 	var order []string
 	byName := map[string]*entry{}
 	for _, f := range found {
+		if !f.current {
+			continue
+		}
 		k := strings.ToLower(f.hostname)
 		e := byName[k]
 		if e == nil {
@@ -231,4 +237,14 @@ func completeClientNames(a *app, cmd *cobra.Command, toComplete string) []string
 		out = append(out, e.name+"\t"+desc)
 	}
 	return out
+}
+
+// firstText returns the first non-empty value of keys, as text.
+func firstText(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v := output.Text(m[k]); v != "" {
+			return v
+		}
+	}
+	return ""
 }

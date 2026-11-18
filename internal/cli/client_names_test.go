@@ -13,7 +13,7 @@ import (
 func hostnameRoutes() map[string]http.HandlerFunc {
 	wireless := []struct{ mac, json string }{
 		{"aabbccddeeff", fmt.Sprintf(`{"mac":"aabbccddeeff","hostname":["LAPTOP-JDOE"],"last_hostname":"LAPTOP-JDOE","site_id":"%s"}`, siteHQ)},
-		{"aabbccddee01", fmt.Sprintf(`{"mac":"aabbccddee01","hostname":["laptop-jdoe2"],"last_hostname":"laptop-jdoe2","site_id":"%s"}`, siteHQ)},
+		{"aabbccddee01", fmt.Sprintf(`{"mac":"aabbccddee01","hostname":["laptop-jdoe2","OLD-NAME"],"last_hostname":"laptop-jdoe2","site_id":"%s"}`, siteHQ)},
 		{"0a0b0c0d0e01", fmt.Sprintf(`{"mac":"0a0b0c0d0e01","hostname":["CAM_01\u0000"],"last_hostname":"CAM_01\u0000","site_id":"%s"}`, siteHQ)},
 		{"0a0b0c0d0e02", fmt.Sprintf(`{"mac":"0a0b0c0d0e02","hostname":["printer"],"last_hostname":"printer","site_id":"%s"}`, siteHQ)},
 	}
@@ -72,8 +72,10 @@ func TestDescribeClientHostnameAmbiguous(t *testing.T) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
 	}
-	// --type narrows the search to one of them
-	run(t, "describe", "client", "printer", "--type", "wireless")
+	// the hostname is resolved over both client types whatever --type says
+	if _, err := runErr("describe", "client", "printer", "--type", "wireless"); err == nil || !strings.Contains(err.Error(), "matches 2 clients") {
+		t.Errorf("--type should not narrow the hostname lookup: %v", err)
+	}
 }
 
 func TestDescribeClientHostnameNotFound(t *testing.T) {
@@ -101,11 +103,10 @@ func TestCompleteClientNames(t *testing.T) {
 	if strings.Count(strings.ToLower(out), "printer\t") != 1 || !strings.Contains(out, "2 clients") {
 		t.Errorf("shared hostname completion:\n%s", out)
 	}
-	// --type wireless only searches wireless clients
-	m.reset()
-	run(t, "__complete", "describe", "client", "--type", "wireless", "pri")
-	if c := m.called("/api/v1/orgs/" + orgID + "/wired_clients/search"); len(c) > 0 {
-		t.Errorf("wired search with --type wireless: %v", c)
+	// earlier hostnames of a client are not offered (describe may not find them)
+	out = run(t, "__complete", "describe", "client", "old")
+	if strings.Contains(out, "OLD-NAME") {
+		t.Errorf("completion offers a past hostname:\n%s", out)
 	}
 	// describe takes one NAME: no second completion, no API call
 	m.reset()
@@ -113,4 +114,26 @@ func TestCompleteClientNames(t *testing.T) {
 	if strings.Contains(out, "LAPTOP") || len(m.called("/api/v1/orgs/"+orgID+"/clients/search")) > 0 {
 		t.Errorf("completed a second argument:\n%s", out)
 	}
+}
+
+// A client that is wireless and wired often has no hostname in its wired
+// record: --type wired still resolves the hostname through the wireless
+// search, and the wired view shows the hostname when the record has one.
+func TestDescribeClientHostnameTypeWired(t *testing.T) {
+	routes := hostnameRoutes()
+	wired := fmt.Sprintf(`{"mac":"aabbccddeeff","ip":["10.0.1.5"],"device_mac":["5c5b35000002"],"port_id":["ge-0/0/1"],"device_mac_port":[{"device_mac":"5c5b35000002","port_id":"ge-0/0/1","port_parent":"","when":"2026-11-17T04:38:02.177+0000"}],"vlan":[10],"site_id":"%s"}`, siteHQ)
+	printer := fmt.Sprintf(`{"mac":"001122334455","hostname":["PRINTER"],"last_hostname":"PRINTER","site_id":"%s"}`, siteHQ)
+	routes["/api/v1/orgs/"+orgID+"/wired_clients/search"] = func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("mac") {
+		case "aabbccddeeff":
+			fmt.Fprintf(w, `{"results":[%s],"total":1}`, wired)
+		case "001122334455":
+			fmt.Fprintf(w, `{"results":[%s],"total":1}`, printer)
+		default:
+			fmt.Fprint(w, `{"results":[],"total":0}`)
+		}
+	}
+	setupRoutes(t, routes)
+	assertContains(t, run(t, "describe", "client", "LAPTOP-JDOE", "--type", "wired"), "Type:", "wired", "ge-0/0/1")
+	assertContains(t, run(t, "describe", "client", "001122334455", "--type", "wired"), "Hostname:", "PRINTER")
 }

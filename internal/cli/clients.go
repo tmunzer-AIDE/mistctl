@@ -388,7 +388,7 @@ func describeClient(ctx context.Context, a *app, name string) (*described, error
 	var mac string
 	if cache.IsMAC(name) {
 		mac = cache.NormalizeMAC(name)
-	} else if mac, err = resolveClientHostname(ctx, a, name, t, w, dur); err != nil {
+	} else if mac, err = resolveClientHostname(ctx, a, name, w, dur); err != nil {
 		return nil, err
 	}
 	var wl, wd *described
@@ -584,7 +584,7 @@ func describeWired(ctx context.Context, a *app, mac string, w window) (*describe
 	}
 	return &described{
 		Header: [][2]string{
-			{"Hostname", output.Text(m["dhcp_hostname"])},
+			{"Hostname", firstText(m, "last_hostname", "dhcp_hostname", "hostname")},
 			{"MAC", mac},
 			{"Type", "wired"},
 			{"Site", siteLabel(a.siteNames(ctx), output.Text(m["site_id"]))},
