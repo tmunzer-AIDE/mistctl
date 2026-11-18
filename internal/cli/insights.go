@@ -28,7 +28,8 @@ import (
 // rest: default metrics, an interval picked from the window, the site of the
 // object, and the endpoint that serves the metric.
 //
-// One request is sent per metric, each with the fixed start/end window.
+// One request is sent per metric, each with the fixed start/end window; a
+// series Mist pages (1000 points a page) is read whole, one request a page.
 
 type insightOpts struct {
 	listOpts          // --duration, --start, --end
@@ -68,7 +69,10 @@ The default view is one line per series (min, average, max, last value and
 a trend); --points prints every value. -o json and -o yaml print the API
 answers, one per metric.
 
-One API request is sent per metric.`,
+One API request is sent per metric, plus one per extra page when a series
+has more than 1000 points (an --interval much finer than the window). A
+series that cannot be read whole is printed with a warning and the command
+exits with an error.`,
 		Example: `  mistctl insights site --site HQ
   mistctl insights client laptop-42
   mistctl insights client aa:bb:cc:dd:ee:ff rssi --duration 6h --points
@@ -186,7 +190,7 @@ here shows the switch metrics.
 at most 60 points (for most metrics: 10m up to 10 hours, then 1h). Mist keeps
 10 minute data for a day and hourly data for two weeks.
 
-API requests: one per metric`)
+API requests: one per metric (and per extra page of 1000 points)`)
 	switch kind {
 	case "site":
 		b.WriteString(".")
@@ -274,13 +278,22 @@ func runInsights(ctx context.Context, a *app, o *insightOpts, kind, name string,
 			// Series are paged like lists (100 points by default).
 			q.limit = client.Ptr(client.PageSize)
 		}
-		raw, err := fetchInsight(ctx, cl, tgt, n, d, q)
+		var body json.RawMessage
+		var incomplete string
+		if q.limit != nil && (d == nil || d.Type != "keyvalues") {
+			body, incomplete, err = fetchInsightPages(ctx, cl, tgt, n, d, q)
+		} else {
+			var raw client.Raw
+			raw, err = fetchInsight(ctx, cl, tgt, n, d, q)
+			body = raw.Body
+		}
 		res := &insightResult{metric: n, def: d, interval: interval, err: err}
 		if err == nil {
-			if res, err = parseInsight(n, d, raw.Body); err != nil {
+			if res, err = parseInsight(n, d, body); err != nil {
 				res = &insightResult{metric: n, def: d, err: err}
 			} else {
 				res.interval = interval
+				res.incomplete = incomplete
 			}
 		}
 		if res.err != nil {
@@ -305,6 +318,13 @@ func runInsights(ctx context.Context, a *app, o *insightOpts, kind, name string,
 			return err
 		}
 	}
+	partial := 0
+	for _, r := range results {
+		if r.err == nil && r.incomplete != "" {
+			partial++
+			fmt.Fprintf(a.err, "warning: %s is incomplete: %s; the points and statistics above only cover what was read\n", output.Safe(r.metric), r.incomplete)
+		}
+	}
 	if failed > 0 {
 		for _, r := range results {
 			if r.err != nil {
@@ -312,6 +332,9 @@ func runInsights(ctx context.Context, a *app, o *insightOpts, kind, name string,
 			}
 		}
 		return fmt.Errorf("%d of %d metrics could not be read", failed, len(results))
+	}
+	if partial > 0 {
+		return fmt.Errorf("%d of %d metrics could not be read completely", partial, len(results))
 	}
 	return nil
 }
@@ -437,9 +460,12 @@ func printInsightDoc(a *app, results []*insightResult) error {
 		k, _ := json.Marshal(r.metric)
 		b.Write(k)
 		b.WriteByte(':')
-		if r.err != nil {
+		switch {
+		case r.err != nil:
 			b.Write(mustJSON(map[string]string{"error": r.err.Error()}))
-		} else {
+		case r.incomplete != "":
+			b.Write(appendField(r.raw, "incomplete", r.incomplete))
+		default:
 			b.Write(r.raw)
 		}
 	}
@@ -453,6 +479,7 @@ type insightQuery struct {
 	window   window
 	interval string
 	limit    *int
+	page     *int
 	params   url.Values
 }
 
@@ -482,7 +509,7 @@ func fetchInsight(ctx context.Context, cl *client.Client, t *insightTarget, metr
 	si := cl.SDK.SitesInsights()
 	type call = func(context.Context) (models.ApiResponse[models.ResponseDeviceMetrics], error)
 	device := func(ctx context.Context) (models.ApiResponse[models.ResponseDeviceMetrics], error) {
-		return si.GetSiteInsightMetricsForDevice(ctx, t.site, metric, t.mac, nil, q.window.start, q.window.end, nil, interval, q.limit, nil)
+		return si.GetSiteInsightMetricsForDevice(ctx, t.site, metric, t.mac, nil, q.window.start, q.window.end, nil, interval, q.limit, q.page)
 	}
 	plain := func(path string) (client.Raw, error) {
 		v := url.Values{}
@@ -497,6 +524,9 @@ func fetchInsight(ctx context.Context, cl *client.Client, t *insightTarget, metr
 		if q.limit != nil {
 			v.Set("limit", strconv.Itoa(*q.limit))
 		}
+		if q.page != nil {
+			v.Set("page", strconv.Itoa(*q.page))
+		}
 		return cl.Get(ctx, path, v)
 	}
 	base := "/api/v1/sites/" + t.site.String() + "/insights/"
@@ -509,18 +539,18 @@ func fetchInsight(ctx context.Context, cl *client.Client, t *insightTarget, metr
 	case "switch":
 		if d != nil && d.inScope("switch") {
 			calls = append(calls, func(ctx context.Context) (models.ApiResponse[models.ResponseDeviceMetrics], error) {
-				return si.GetSiteInsightMetricsForSwitch(ctx, t.site, metric, t.mac, nil, q.window.start, q.window.end, nil, interval, q.limit, nil)
+				return si.GetSiteInsightMetricsForSwitch(ctx, t.site, metric, t.mac, nil, q.window.start, q.window.end, nil, interval, q.limit, q.page)
 			})
 		} else {
 			calls = append(calls, device)
 		}
 	case "mxedge":
 		calls = append(calls, func(ctx context.Context) (models.ApiResponse[models.ResponseDeviceMetrics], error) {
-			return si.GetSiteInsightMetricsForMxEdge(ctx, t.site, metric, t.mac, nil, q.window.start, q.window.end, nil, interval, q.limit, nil)
+			return si.GetSiteInsightMetricsForMxEdge(ctx, t.site, metric, t.mac, nil, q.window.start, q.window.end, nil, interval, q.limit, q.page)
 		})
 	case "ap":
 		stats := func(ctx context.Context) (models.ApiResponse[models.ResponseDeviceMetrics], error) {
-			return si.GetSiteInsightMetricsForAP(ctx, t.site, t.id, metric, q.window.start, q.window.end, nil, interval, q.limit, nil)
+			return si.GetSiteInsightMetricsForAP(ctx, t.site, t.id, metric, q.window.start, q.window.end, nil, interval, q.limit, q.page)
 		}
 		if d == nil || d.inScope("device") {
 			calls = append(calls, device, stats)
