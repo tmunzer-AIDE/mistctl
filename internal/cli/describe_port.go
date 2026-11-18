@@ -50,6 +50,9 @@ func enrichPort(ctx context.Context, a *app, d *described, m map[string]any) {
 	}
 	span := siteWindowSpan(w)
 	note := func(key, label string, err error) {
+		if isNotFound(err) {
+			return // no data, as for the stats
+		}
 		fmt.Fprintf(a.err, "warning: %s unavailable: %v\n", key, err)
 		d.Header = append(d.Header, [2]string{label, "unavailable: " + err.Error()})
 		d.Doc = appendField(d.Doc, key+"_error", err.Error())
