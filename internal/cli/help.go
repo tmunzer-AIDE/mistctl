@@ -323,6 +323,12 @@ until --limit matching events are found.
 --duration (default 1d). --sle picks the family and so the columns: wifi
 (default), wired or wan. With a site, only that site is shown.`,
 		examples: []string{"get sles -A", "get sles -A --sle wired --duration 7d", "get sles --site HQ --sle wan"},
+		describe: "Explains one SLE metric of a site. METRIC is the metric name, e.g. time-to-connect, successful-connect, coverage, capacity, roaming, throughput, ap-health, switch-health, gateway-health or wan-link-health; an unknown name lists the metrics of the site. It needs a site (--site or the context's). Over --duration (default 1d) or --start/--end, it prints the success rate and the classifiers behind the degraded part, ranked by their share of it (GET /sites/{site_id}/sle/site/{site_id}/metric/{metric}/summary-trend; 1 API call). --with impacted adds the most degraded clients and APs (switches and wired clients for a wired metric, gateways and interfaces for a WAN metric; 2 more API calls). -o json and -o yaml print one document: summary (what mistctl computed), sle (the API response with its time series) and the impacted lists.",
+		describeExamples: []string{
+			"describe sle time-to-connect --site HQ",
+			"describe sle successful-connect --site HQ --duration 4h --with impacted",
+			"describe sle switch-health --site HQ --duration 7d -o json",
+		},
 	},
 	"rrm": {
 		group: "monitoring", title: "RRM state",

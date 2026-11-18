@@ -24,7 +24,13 @@ var mxedgeColumns = []output.Column{
 	output.Col("STATUS", "status"),
 	output.Col("TUNNELS", "num_tunnels"),
 	output.Col("UPTIME", "uptime").WithFormat(output.Duration),
-	output.Col("SITE", "site_name", "site_id").AsWide(),
+	// an org-level Mist Edge carries the nil UUID as site_id: not a site
+	output.Col("SITE", "site_name", "site_id").WithFormat(func(v any) string {
+		if s := output.Text(v); s != uuid.Nil.String() {
+			return s
+		}
+		return ""
+	}).AsWide(),
 	output.Col("SERIAL", "serial").AsWide(),
 	output.Col("CLUSTER", "mxcluster_id").AsWide(),
 	output.Col("LAST-SEEN", "last_seen").WithFormat(output.Age).AsWide(),

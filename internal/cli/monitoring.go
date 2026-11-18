@@ -453,13 +453,16 @@ func sleColumns(kind string) []output.Column {
 func slesResource() *resource {
 	return &resource{
 		Name: "sles", Singular: "sle", Aliases: []string{"sle-scores"},
-		Short:      "SLE scores per site over --duration (--sle wifi, wired or wan)",
-		Scope:      "org/site",
-		Endpoint:   "GET /api/v1/orgs/{org_id}/insights/sites-sle",
-		Columns:    sleColumns("wifi"),
-		ColumnsFor: func(o *listOpts) []output.Column { return sleColumns(o.sle) },
-		MatchKeys:  []string{"site_id", "site_name"},
-		FlagValues: map[string][]string{"sle": sleKinds},
+		Short:         "SLE scores per site over --duration (--sle wifi, wired or wan)",
+		Scope:         "org/site",
+		Endpoint:      "GET /api/v1/orgs/{org_id}/insights/sites-sle",
+		Columns:       sleColumns("wifi"),
+		ColumnsFor:    func(o *listOpts) []output.Column { return sleColumns(o.sle) },
+		MatchKeys:     []string{"site_id", "site_name"},
+		Describe:      describeSLE,
+		DescribeArg:   "METRIC",
+		DescribeFlags: sleDescribeFlags,
+		FlagValues:    map[string][]string{"sle": sleKinds},
 		Flags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.sle, "sle", "wifi", "SLE family: wifi, wired, wan")
 			addWindowFlags(fs, o, "1d", "time window")
