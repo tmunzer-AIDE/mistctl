@@ -37,6 +37,7 @@ type listOpts struct {
 	derived    bool   // site-settings
 	admin      string // audit-logs
 	template   string // sites
+	siteRows   bool   // licenses: set by List when the rows are a site's usage
 	// historical searches
 	start, end string
 	sortOrder  string // newest, oldest
@@ -184,7 +185,7 @@ func init() {
 		networksResource(), servicesResource(), evpnTopologiesResource(),
 		mapsResource(), mapstacksResource(),
 		orgSettingsResource(), siteSettingsResource(), deviceProfilesResource(), siteGroupsResource(),
-		alarmTemplatesResource(), webhooksResource(), nacRulesResource(),
+		alarmTemplatesResource(), webhooksResource(), nacRulesResource(), licensesResource(),
 		// monitoring
 		alarmsResource(), eventsResource(), slesResource(), rrmResource(), rrmEventsResource(),
 		alarmDefinitionsResource(), eventDefinitionsResource(), webhookDeliveriesResource(),

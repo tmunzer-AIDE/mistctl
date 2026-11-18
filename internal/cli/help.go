@@ -172,6 +172,26 @@ does not set it.`,
 			"get wan-clients --ip 10.1.0.25 -o yaml",
 		},
 	},
+	"licenses": {
+		group: "inventory", title: "license type",
+		short: "License entitlement, consumption and availability per type, or a site's usage",
+		about: `Without a site (or with -A), shows one row per license type (SUB-MAN,
+SUB-SW6, ...) from the org license summary: ENTITLED, USED and AVAILABLE
+(entitled minus used; negative when more is consumed than entitled).
+-o wide adds FULLY-LOADED (what every device would need with every feature
+on), the number of active SUBSCRIPTIONS and the NEXT-EXPIRY date.
+
+With a site, shows the licenses the site uses (SITE-USAGE) next to the org
+entitlement and consumption (ORG-ENTITLED, ORG-USED). One API call either
+way. The rows are built by mistctl: -o json and -o yaml print them, not the
+API answer.`,
+		examples: []string{
+			"get licenses",
+			"get licenses -o wide",
+			"get licenses --site HQ",
+			"get license SUB-MAN -o yaml",
+		},
+	},
 	"nac-rules": {
 		group: "config", title: "NAC rule",
 		about: `Lists the Mist NAC rules in evaluation order (ORDER, smallest first; the
