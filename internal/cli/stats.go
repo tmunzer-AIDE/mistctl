@@ -500,16 +500,39 @@ func portsResource() *resource {
 		},
 		DescribeFlags: func(fs *pflag.FlagSet, o *listOpts) {
 			fs.StringVar(&o.device, "device", "", "device the port belongs to (name, ID or MAC); instead of the DEVICE: prefix")
+			addWindowFlags(fs, o, "1d", "window of the clients and of the events")
 		},
 		DescribeArg: "[DEVICE:]PORT",
-		DescribeLong: `Prints every stat of one switch or WAN edge port.
+		DescribeLong: `Prints every stat of one switch or WAN edge port, and what is around it.
 
 The port is identified by its device and its port ID, given either as one
 DEVICE:PORT argument or as PORT plus --device. DEVICE can be a device name,
 ID or MAC address. With PORT alone, the port must exist on only one device
-in the current scope (site or org).`,
+in the current scope (site or org).
+
+After the stats of the port (GET .../stats/ports/search, 1 API call), it
+adds, with 3 more API calls (up to 5 for a device with more than 1000
+events in the window):
+  - the neighbor, when it is a device of the org (from the device index)
+  - the port_config and port_config_overwrite entries of the device for
+    this port (GET /sites/{site_id}/devices/{device_id}). Most ports are
+    configured by the switch or WAN edge template of the site and have no
+    such entry: this is said, and the template rules are not evaluated
+    (the Usage line is the result)
+  - the wired clients learned on this port of this device over --duration
+    (default 1d) (GET /sites/{site_id}/wired_clients/search, first 10),
+    with the IP and VLAN seen on the port
+  - the last 10 events of the port over --duration
+    (GET /sites/{site_id}/devices/events/search for the device, filtered on
+    the port; at most 3 pages of device events are read)
+A section that cannot be read is reported and does not fail the command.
+With -o json or -o yaml the port stats stay at the top level of the
+document and gain the fields neighbor_device_name, port_config,
+port_config_overwrite, clients (each with port_entry, what was seen on this
+port) and events.`,
 		DescribeExample: `  mistctl describe port sw-core:ge-0/0/1
   mistctl describe port ge-0/0/1 --device sw-core
+  mistctl describe port sw-core:ge-0/0/1 --duration 7d
   mistctl describe port ge-0/0/1 --device 5c:5b:35:00:00:02 -o json`,
 		Describe: describePort,
 	}
@@ -642,7 +665,7 @@ func describePort(ctx context.Context, a *app, name string) (*described, error) 
 		}
 		return orDash(a) + " / " + orDash(b)
 	}
-	return &described{
+	d := &described{
 		Header: [][2]string{
 			{"Device", dev},
 			{"Port", t("port_id")},
@@ -666,8 +689,11 @@ func describePort(ctx context.Context, a *app, name string) (*described, error) 
 			{"Transceiver", strings.TrimSpace(t("xcvr_model") + " " + t("xcvr_part_number") + " " + t("xcvr_serial"))},
 			{"Last flapped", ageOf(m["last_flapped"])},
 		},
-		Doc: items[0],
-	}, nil
+		Doc:     items[0],
+		Primary: items[0],
+	}
+	enrichPort(ctx, a, d, m)
+	return d, nil
 }
 
 // ---- zones ----------------------------------------------------------------
