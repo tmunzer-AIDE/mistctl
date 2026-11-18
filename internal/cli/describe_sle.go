@@ -192,6 +192,10 @@ func describeSLE(ctx context.Context, a *app, metric string) (*described, error)
 	switch {
 	case len(cls) > 0 && cls[0].Degraded > 0:
 		top = fmt.Sprintf("%s (%s of the degraded %s)", cls[0].Name, slePct(cls[0].Degraded, clsDegraded), sleOr(unit, "samples"))
+		// the API can count degraded classifier samples the metric ignores
+		if total > 0 && degraded == 0 {
+			top += "; the success rate counts none of them"
+		}
 	case total > 0 && degraded > 0:
 		top = "not attributed: the metric is degraded but its classifiers report nothing"
 	case total > 0:

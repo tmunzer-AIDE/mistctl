@@ -32,6 +32,10 @@ func sleRoutes() map[string]http.HandlerFunc {
 			"classifiers":[
 				{"name":"dhcp","y_label":"attempts","samples":{"total":[50],"degraded":[0]}},
 				{"name":"association","y_label":"attempts","samples":{"total":[50],"degraded":[0]}}]}`),
+		// the classifiers report degraded samples the metric does not count
+		base + "/metric/roaming/summary-trend": body(`{"start":1790000000,"end":1790014400,
+			"sle":{"name":"roaming","x_label":"seconds","samples":{"total":[100],"degraded":[0],"value":[0]}},
+			"classifiers":[{"name":"latency","y_label":"attempts","samples":{"total":[144],"degraded":[1]}}]}`),
 		base + "/metrics": body(`{"enabled":["time-to-connect","coverage","coverage-v2"],"supported":["time-to-connect","coverage","roaming"]}`),
 	}
 }
@@ -120,6 +124,8 @@ func TestDescribeSLEEdges(t *testing.T) {
 	if strings.Index(out, "association ") > strings.Index(out, "dhcp ") {
 		t.Errorf("tied classifiers not sorted by name:\n%s", out)
 	}
+	out = run(t, "describe", "sle", "roaming", "--site", "HQ")
+	assertContains(t, out, "100.0%", "latency (100.0% of the degraded attempts); the success rate counts none of them")
 	// the help states the real scope and output
 	out = run(t, "describe", "sle", "-h")
 	assertContains(t, out, "Scope: site", "failed-to-connect")
