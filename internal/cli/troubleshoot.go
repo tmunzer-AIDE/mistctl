@@ -229,10 +229,13 @@ func printTroubleshoot(w, errw io.Writer, label string, body json.RawMessage) er
 		return nil
 	}
 	for i, r := range resp.Results {
-		title := output.Text(r["reason"])
-		if c := output.Text(r["category"]); c != "" {
-			title = c + ": " + title
+		var parts []string
+		for _, k := range []string{"category", "reason"} {
+			if v := output.Text(r[k]); v != "" {
+				parts = append(parts, v)
+			}
 		}
+		title := strings.Join(parts, ": ")
 		fmt.Fprintf(w, "\n%d. %s\n", i+1, output.Safe(title))
 		if t := output.Text(r["text"]); t != "" {
 			fmt.Fprintln(w, indent(wrapWidth(output.Safe(t), 75), "   "))

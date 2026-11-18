@@ -16,12 +16,12 @@ func TestTroubleshoot(t *testing.T) {
 				return
 			}
 			_, _ = w.Write([]byte(`{"results":[{"category":"Connectivity","reason":"Weak Signal","text":"Clients experienced poor wireless coverage 14% of the time.","recommendation":"Add access points."},
-				{"category":"Client","reason":"Sticky Client","text":"Poor roaming."}],"start":1700000000,"end":1700086400}`))
+				{"category":"Client","reason":"Sticky Client","text":"Poor roaming."},{"category":"Device Health","text":"AP rebooted."}],"start":1700000000,"end":1700086400}`))
 		},
 	})
 
 	out := run(t, "troubleshoot", "client", "AA-BB-CC-DD-EE-FF", "--duration", "2h")
-	for _, want := range []string{"client aabbccddeeff", "Findings:", "1. Connectivity: Weak Signal", "poor wireless coverage", "Recommendation: Add access points.", "2. Client: Sticky Client"} {
+	for _, want := range []string{"client aabbccddeeff", "Findings:", "1. Connectivity: Weak Signal", "poor wireless coverage", "Recommendation: Add access points.", "2. Client: Sticky Client", "3. Device Health\n"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q:\n%s", want, out)
 		}
